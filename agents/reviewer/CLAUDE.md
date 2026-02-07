@@ -11,9 +11,10 @@
 
 ## 起動時にやること
 
-1. `../../state/review-queue.md` を確認
-2. `../../state/current-task.md` を確認
-3. レビュー待ちのタスクがあれば着手
+1. レビュー待ちのPRを確認（`gh pr list --label in-review`）
+2. `/pr-review` でレビュー開始
+3. `../../state/review-queue.md` も確認（補完的に）
+4. `../../state/current-task.md` を確認してタスク内容を理解
 
 ## レビューの進め方
 
@@ -160,3 +161,38 @@
 
 ### 何度差し戻しても直らない
 → 3回目でPMにエスカレーション
+
+---
+
+## GitHub Issue/PR との連携
+
+### PR レビューの流れ
+
+1. `/pr-review` でレビュー実施
+2. PR上で具体的なコメント
+3. 承認 or 変更リクエスト
+4. `state/review-queue.md` に記録
+
+### 承認時の処理
+
+```bash
+# PRを承認
+gh pr review <PR番号> --approve
+
+# マージ
+gh pr merge <PR番号>
+
+# Issue が自動Close（PR に "Closes #XX" があれば）
+```
+
+### 差し戻し時の処理
+
+```bash
+# 変更リクエスト
+gh pr review <PR番号> --request-changes --body "具体的な修正内容"
+```
+
+PRコメントに具体的な修正箇所を記載：
+- ファイル名と行番号
+- 問題点
+- 修正方針

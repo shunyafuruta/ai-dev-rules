@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 💬 質問・相談
+    url: https://github.com/shunyafuruta/ai-dev-rules/discussions
+    about: 質問や相談はDiscussionsで
+  - name: 📚 ドキュメント
+    url: https://github.com/shunyafuruta/ai-dev-rules/blob/main/README.md
+    about: README.mdを参照してください

@@ -76,6 +76,42 @@ ln -s .ai-dev-rules/CLAUDE.md CLAUDE.md
 find .cursor/commands -type f -name "*.md" -exec sed -i '' 's/kizuki-dsd\/manabi/your-org\/your-repo/g' {} +
 ```
 
+### 5. GitHub Actionsのセットアップ（オプション）
+
+#### 前提条件
+- GitHub Actionsが有効になっていること
+- Claude Code OAuthトークンまたはAnthropic API Keyを取得済み
+
+#### セットアップ手順
+
+```bash
+# .github/ ディレクトリをコピー
+cp -r ai-dev-rules/.github /path/to/your-project/
+```
+
+#### シークレットの設定
+
+GitHubリポジトリの Settings > Secrets and variables > Actions で以下を設定：
+
+1. **`CLAUDE_CODE_OAUTH_TOKEN`** (推奨)
+   - Claude Code OAuthトークンを設定
+   - 取得方法: https://code.claude.com/settings/tokens
+
+2. **`ANTHROPIC_API_KEY`** (代替)
+   - Anthropic API Keyを設定
+   - 取得方法: https://console.anthropic.com/
+
+#### ワークフローの説明
+
+- **`claude-code.yml`**: PR/Issueに `@claude` とメンションすると自動実行
+- **`claude-code-review.yml`**: PR作成時に自動レビュー（オプション）
+- **`claude.yml`**: レガシー設定（必要に応じて削除可能）
+
+#### PRテンプレートとIssueガイドライン
+
+- **`PULL_REQUEST_TEMPLATE.md`**: PR作成時の自動テンプレート
+- **`ISSUE_GUIDELINES.md`**: Issue作成時のガイドライン
+
 ---
 
 ## 📁 構成
@@ -104,6 +140,15 @@ ai-dev-rules/
 │   │   ├── issue.md        # Issue実装フロー
 │   │   └── test.md         # テストコマンド
 │   └── settings.json       # Claude Code設定（サンプル）
+├── .github/
+│   ├── prompts/            # AIプロンプト
+│   │   └── pr-review.md    # PRレビュー用プロンプト
+│   ├── workflows/          # GitHub Actions
+│   │   ├── claude-code.yml           # Claude Code連携（@claudeメンション）
+│   │   ├── claude-code-review.yml    # 自動レビュー（PR作成時）
+│   │   └── claude.yml                # Claude GitHub Actions
+│   ├── PULL_REQUEST_TEMPLATE.md      # PRテンプレート
+│   └── ISSUE_GUIDELINES.md           # Issueガイドライン
 ├── CLAUDE.md               # プロジェクト指示書（メイン）
 ├── README.md               # このファイル
 └── .gitignore

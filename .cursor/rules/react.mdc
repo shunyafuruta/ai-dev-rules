@@ -1,0 +1,880 @@
+---
+description: Reactコンポーネント開発規約
+globs:
+alwaysApply: true
+---
+
+# Reactコンポーネント規約
+
+## 重要: React 19.2とReact Compilerについて
+
+**このプロジェクトはReact 19.2とReact Compilerを使用しています。**
+
+### React Compilerによる自動最適化
+
+React Compilerが以下を自動的に最適化するため、**手動でのメモ化は不要です**：
+
+- **`useMemo`は不要**: 計算結果は自動的にメモ化されます
+- **`useCallback`は不要**: 関数は自動的にメモ化されます
+- **`React.memo`は不要**: コンポーネントは自動的に最適化されます
+
+### コード例: メモ化不要
+
+```typescript
+// ✅ React 19.2 + React Compiler: メモ化不要
+function StudentList({ students }: StudentListProps): JSX.Element {
+  // React Compilerが自動最適化（useMemo不要）
+  const activeStudents = students.filter(s => s.status === 'active');
+
+  // React Compilerが自動最適化（useCallback不要）
+  const handleSelect = (id: string) => {
+    console.log('Selected:', id);
+  };
+
+  return (
+    <div>
+      {activeStudents.map(student => (
+        <StudentCard 
+          key={student.id} 
+          student={student} 
+          onSelect={handleSelect} 
+        />
+      ))}
+    </div>
+  );
+}
+
+// ✅ React.memoも不要（React Compilerが自動最適化）
+function StudentCard({ student, onSelect }: StudentCardProps): JSX.Element {
+  return (
+    <div onClick={() => onSelect(student.id)}>
+      {student.name}
+    </div>
+  );
+}
+```
+
+### React Compilerが効果的に動作するための前提条件
+
+React Compilerは以下のルールを前提としています（このプロジェクトではすでに準拠済み）：
+
+1. **不変性**: propsやstateを直接変更しない
+2. **冪等性**: 同じpropsで常に同じ結果を返す
+3. **`const`のみ使用**: `let`は使用禁止
+
+```typescript
+// ✅ 良い例: 不変性を守る
+const updatedStudent = { ...student, name: '新しい名前' };
+const updatedStudents = students.map(s => 
+  s.id === studentId ? { ...s, status: 'active' } : s
+);
+
+// ❌ 悪い例: 直接変更（React Compilerが最適化できない）
+student.name = '新しい名前'; // NG
+students.push(newStudent); // NG
+```
+
+### ref as prop（forwardRef不要）
+
+React 19では`forwardRef`が不要になり、通常のpropsとして`ref`を受け取れます。
+
+```typescript
+// ✅ React 19: 通常のpropとしてrefを受け取る
+interface ButtonProps {
+  children: ReactNode;
+  ref?: React.Ref<HTMLButtonElement>;
+}
+
+function Button({ children, ref }: ButtonProps) {
+  return <button ref={ref}>{children}</button>;
+}
+
+// 使用例
+const buttonRef = useRef<HTMLButtonElement>(null);
+<Button ref={buttonRef}>クリック</Button>
+```
+
+### Context APIの簡素化
+
+React 19では`Context.Provider`の代わりに`Context`を直接使用できます。
+
+```typescript
+// ✅ React 19: Contextを直接使用
+<AuthContext value={value}>
+  {children}
+</AuthContext>
+
+// （従来の記法も引き続き動作します）
+<AuthContext.Provider value={value}>
+  {children}
+</AuthContext.Provider>
+```
+
+## 1. コンポーネント構成
+
+**重要: ReactコンポーネントPropsでは`readonly`修飾子を使用しない**
+
+Reactでは「propsは読み取り専用」が大前提のため、TypeScriptの`readonly`修飾子は冗長です。
+React公式や主要ライブラリでもPropsに`readonly`を使用していません。
+
+```typescript
+interface ContractDetailProps {
+  contractId: string | null;
+  showPaymentHistory?: boolean;
+}
+
+/**
+ * 契約詳細を表示するコンポーネント
+ *
+ * @param props - コンポーネントのProps
+ * @param props.contractId - 表示対象の契約ID
+ * @param props.showPaymentHistory - 支払い履歴を表示するかどうか
+ * @returns 契約詳細コンポーネント
+ */
+function ContractDetail({ contractId, showPaymentHistory = false }: ContractDetailProps): JSX.Element {
+  const { data: contract, isLoading, error } = useContract(contractId);
+
+  // 早期リターン: ローディング中
+  if (isLoading) {
+    return <LoadingSpinner />;
+  }
+
+  // 早期リターン: エラー発生
+  if (error) {
+    return <ErrorMessage error={error} />;
+  }
+
+  // 早期リターン: 契約が存在しない
+  if (!contract) {
+    return <NotFound message="契約が見つかりません" />;
+  }
+
+  // メインの描画
+  return (
+    <div>
+      <h1>{contract.contractNumber}</h1>
+      {showPaymentHistory && <PaymentHistory payments={contract.payments} />}
+    </div>
+  );
+}
+```
+
+## 2. TanStack Query の使用
+
+```typescript
+// ✅ 良い例: useQueryを適切に使用
+function ContractList(): JSX.Element {
+  const { data: contracts, isLoading, error } = useQuery({
+    queryKey: ['contracts'],
+    queryFn: fetchContracts,
+  });
+
+  if (isLoading) return <LoadingSpinner />;
+  if (error) return <ErrorMessage error={error} />;
+  if (!contracts) return null;
+
+  return <ContractTable contracts={contracts} />;
+}
+```
+
+## 3. Vite環境変数
+
+```typescript
+// ❌ 違反: process.env.* を直接使用
+const apiUrl = process.env.API_URL;
+
+// ✅ 正しい: import.meta.env を使用
+const apiUrl = import.meta.env.VITE_API_URL;
+```
+
+## 4. セキュリティ
+
+```typescript
+// ❌ XSS脆弱性
+<div dangerouslySetInnerHTML={{ __html: userInput }} />
+
+// ✅ 安全: プレーンテキストとして表示
+<div>{userInput}</div>
+
+// ✅ HTMLが必要な場合はサニタイズ
+import DOMPurify from 'dompurify';
+<div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(userInput) }} />
+```
+
+## 5. コンポーネント設計パターン
+
+### Presentation / Container パターン
+
+**ロジックとUIを分離する**
+
+```typescript
+// ✅ Presentation Component（UI のみ）
+interface ContractListViewProps {
+  contracts: Contract[];
+  isLoading: boolean;
+  onSelect: (id: string) => void;
+}
+
+function ContractListView({ contracts, isLoading, onSelect }: ContractListViewProps) {
+  // 早期リターン: ローディング中
+  if (isLoading) {
+    return <LoadingSpinner />;
+  }
+
+  return (
+    <div className="space-y-4">
+      {contracts.map((contract) => (
+        <ContractCard
+          key={contract.id}
+          contract={contract}
+          onSelect={() => onSelect(contract.id)}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ✅ Container Component（ロジックのみ）
+function ContractListContainer() {
+  const { data: contracts = [], isLoading } = useQuery({
+    queryKey: ['contracts'],
+    queryFn: fetchContracts,
+  });
+
+  const navigate = useNavigate();
+
+  // React Compilerが自動最適化（useCallback不要）
+  const handleSelect = (id: string) => {
+    navigate(`/contracts/${id}`);
+  };
+
+  return (
+    <ContractListView
+      contracts={contracts}
+      isLoading={isLoading}
+      onSelect={handleSelect}
+    />
+  );
+}
+
+export { ContractListContainer as ContractList };
+```
+
+### カスタムフックの作成
+
+**ロジックを再利用可能にする**
+
+```typescript
+/**
+ * 契約データを取得するカスタムフック
+ *
+ * @param contractId - 取得対象の契約ID
+ * @returns 契約データ、ローディング状態、エラー情報
+ */
+function useContract(contractId: string | null) {
+  return useQuery({
+    queryKey: ['contract', contractId],
+    queryFn: () => fetchContract(contractId!),
+    enabled: contractId !== null,
+  });
+}
+
+/**
+ * 契約の更新を行うカスタムフック
+ *
+ * @returns 契約更新関数、ローディング状態、エラー情報
+ */
+function useContractUpdate() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: ContractUpdateInput) => updateContract(data),
+    onSuccess: (updatedContract) => {
+      // キャッシュを更新
+      queryClient.invalidateQueries({ queryKey: ['contracts'] });
+      queryClient.setQueryData(['contract', updatedContract.id], updatedContract);
+    },
+  });
+}
+
+export { useContract, useContractUpdate };
+```
+
+### Context API の適切な使用
+
+**グローバルな状態管理（認証、テーマなど）**
+
+```typescript
+import { createContext, useContext, useReducer } from 'react';
+import type { ReactNode } from 'react';
+
+// State型定義
+interface AuthState {
+  user: User | null;
+  isAuthenticated: boolean;
+}
+
+// Action型定義
+type AuthAction =
+  | { type: 'LOGIN'; payload: User }
+  | { type: 'LOGOUT' };
+
+// Context型定義
+interface AuthContextValue {
+  state: AuthState;
+  login: (user: User) => void;
+  logout: () => void;
+}
+
+// Context作成
+const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+
+// Reducer関数
+function authReducer(state: AuthState, action: AuthAction): AuthState {
+  switch (action.type) {
+    case 'LOGIN':
+      return {
+        user: action.payload,
+        isAuthenticated: true,
+      };
+    case 'LOGOUT':
+      return {
+        user: null,
+        isAuthenticated: false,
+      };
+    default:
+      return state;
+  }
+}
+
+// Provider Component
+interface AuthProviderProps {
+  children: ReactNode;
+}
+
+function AuthProvider({ children }: AuthProviderProps) {
+  const [state, dispatch] = useReducer(authReducer, {
+    user: null,
+    isAuthenticated: false,
+  });
+
+  // React Compilerが自動最適化（useCallback/useMemo不要）
+  const login = (user: User) => {
+    dispatch({ type: 'LOGIN', payload: user });
+  };
+
+  const logout = () => {
+    dispatch({ type: 'LOGOUT' });
+  };
+
+  const value = { state, login, logout };
+
+  return <AuthContext value={value}>{children}</AuthContext>;
+}
+
+// Custom Hook for Context
+function useAuth() {
+  const context = useContext(AuthContext);
+
+  if (context === undefined) {
+    throw new Error('useAuth must be used within AuthProvider');
+  }
+
+  return context;
+}
+
+export { AuthProvider, useAuth };
+```
+
+## 6. フォームハンドリング（React Hook Form + Zod）
+
+**型安全なフォームバリデーション**
+
+```typescript
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+
+// Zodスキーマ定義
+const contractFormSchema = z.object({
+  studentName: z.string().min(1, '生徒名は必須です').max(50, '生徒名は50文字以内で入力してください'),
+  courseType: z.enum(['individual', 'group'], {
+    required_error: 'コース種別を選択してください',
+  }),
+  startDate: z.string().min(1, '開始日は必須です'),
+  monthlyFee: z.number().min(0, '月額料金は0以上で入力してください'),
+});
+
+// 型推論
+type ContractFormInput = z.infer<typeof contractFormSchema>;
+
+/**
+ * 契約登録フォームコンポーネント
+ *
+ * @param props - コンポーネントのProps
+ * @param props.onSubmit - フォーム送信時のハンドラ
+ * @returns フォームコンポーネント
+ */
+interface ContractFormProps {
+  onSubmit: (data: ContractFormInput) => void;
+  defaultValues?: Partial<ContractFormInput>;
+}
+
+function ContractForm({ onSubmit, defaultValues }: ContractFormProps) {
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<ContractFormInput>({
+    resolver: zodResolver(contractFormSchema),
+    defaultValues,
+  });
+
+  return (
+    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+      <div>
+        <label htmlFor="studentName" className="block text-sm font-medium">
+          生徒名 <span className="text-red-500">*</span>
+        </label>
+        <input
+          {...register('studentName')}
+          id="studentName"
+          type="text"
+          className="mt-1 block w-full rounded-md border-gray-300"
+          aria-invalid={errors.studentName ? 'true' : 'false'}
+          aria-describedby={errors.studentName ? 'studentName-error' : undefined}
+        />
+        {errors.studentName && (
+          <p id="studentName-error" className="mt-1 text-sm text-red-600" role="alert">
+            {errors.studentName.message}
+          </p>
+        )}
+      </div>
+
+      <div>
+        <label htmlFor="courseType" className="block text-sm font-medium">
+          コース種別 <span className="text-red-500">*</span>
+        </label>
+        <select
+          {...register('courseType')}
+          id="courseType"
+          className="mt-1 block w-full rounded-md border-gray-300"
+          aria-invalid={errors.courseType ? 'true' : 'false'}
+        >
+          <option value="">選択してください</option>
+          <option value="individual">個別指導</option>
+          <option value="group">集団指導</option>
+        </select>
+        {errors.courseType && (
+          <p className="mt-1 text-sm text-red-600" role="alert">
+            {errors.courseType.message}
+          </p>
+        )}
+      </div>
+
+      <button
+        type="submit"
+        disabled={isSubmitting}
+        className="px-4 py-2 bg-blue-600 text-white rounded-md disabled:bg-gray-400"
+      >
+        {isSubmitting ? '送信中...' : '登録'}
+      </button>
+    </form>
+  );
+}
+
+export { ContractForm };
+```
+
+## 7. TanStack Query ガイド
+
+### クエリキーの命名規則
+
+**階層的な構造を持たせる**
+
+```typescript
+// ✅ 良い例: 階層的なクエリキー
+const queryKeys = {
+  all: ['contracts'] as const,
+  lists: () => [...queryKeys.all, 'list'] as const,
+  list: (filters: ContractFilters) => [...queryKeys.lists(), filters] as const,
+  details: () => [...queryKeys.all, 'detail'] as const,
+  detail: (id: string) => [...queryKeys.details(), id] as const,
+};
+
+// 使用例
+useQuery({
+  queryKey: queryKeys.detail('contract-123'),
+  queryFn: () => fetchContract('contract-123'),
+});
+
+// キャッシュ無効化
+queryClient.invalidateQueries({ queryKey: queryKeys.lists() });
+queryClient.invalidateQueries({ queryKey: queryKeys.detail('contract-123') });
+```
+
+### オプティミスティック更新
+
+**ユーザー体験を向上させる楽観的更新**
+
+```typescript
+/**
+ * 契約ステータスを更新するカスタムフック
+ */
+function useUpdateContractStatus() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (params: { contractId: string; status: ContractStatus }) =>
+      updateContractStatus(params.contractId, params.status),
+
+    // オプティミスティック更新
+    onMutate: async ({ contractId, status }) => {
+      // 進行中のクエリをキャンセル
+      await queryClient.cancelQueries({ queryKey: ['contract', contractId] });
+
+      // 以前のデータを保存
+      const previousContract = queryClient.getQueryData(['contract', contractId]);
+
+      // 楽観的にキャッシュを更新
+      queryClient.setQueryData(['contract', contractId], (old: Contract) => ({
+        ...old,
+        status,
+      }));
+
+      // ロールバック用のデータを返す
+      return { previousContract };
+    },
+
+    // エラー時: ロールバック
+    onError: (err, variables, context) => {
+      if (context?.previousContract) {
+        queryClient.setQueryData(
+          ['contract', variables.contractId],
+          context.previousContract
+        );
+      }
+    },
+
+    // 成功時: キャッシュを再取得
+    onSuccess: (data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['contract', variables.contractId] });
+    },
+  });
+}
+
+export { useUpdateContractStatus };
+```
+
+### エラーハンドリング
+
+**適切なエラー処理**
+
+```typescript
+/**
+ * 契約一覧を表示するコンポーネント
+ */
+function ContractList() {
+  const {
+    data: contracts,
+    isLoading,
+    error,
+    refetch,
+  } = useQuery({
+    queryKey: ['contracts'],
+    queryFn: fetchContracts,
+    retry: 3, // 3回までリトライ
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
+  });
+
+  // 早期リターン: ローディング中
+  if (isLoading) {
+    return <LoadingSpinner />;
+  }
+
+  // 早期リターン: エラー発生
+  if (error) {
+    return (
+      <div className="p-4 bg-red-50 rounded-md">
+        <h3 className="text-red-800 font-medium">データの取得に失敗しました</h3>
+        <p className="text-red-600 text-sm mt-1">{error.message}</p>
+        <button
+          onClick={() => refetch()}
+          className="mt-2 px-3 py-1 bg-red-600 text-white rounded-md text-sm"
+        >
+          再試行
+        </button>
+      </div>
+    );
+  }
+
+  // 早期リターン: データが空
+  if (!contracts || contracts.length === 0) {
+    return (
+      <div className="text-center py-8 text-gray-500">
+        契約データがありません
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {contracts.map((contract) => (
+        <ContractCard key={contract.id} contract={contract} />
+      ))}
+    </div>
+  );
+}
+
+export { ContractList };
+```
+
+## 8. パフォーマンス最適化
+
+### コード分割（React.lazy + Suspense）
+
+**ページごとにバンドルを分割**
+
+```typescript
+import { lazy, Suspense } from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+
+import { LoadingSpinner } from '@/components/common/LoadingSpinner';
+
+// 遅延ロード
+const ContractSearchPage = lazy(() => import('@/pages/contract/ContractSearchPage'));
+const ContractDetailPage = lazy(() => import('@/pages/contract/ContractDetailPage'));
+const ContractRegisterPage = lazy(() => import('@/pages/contract/ContractRegisterPage'));
+
+/**
+ * アプリケーションルーター
+ */
+function AppRouter() {
+  return (
+    <BrowserRouter>
+      <Suspense fallback={<LoadingSpinner />}>
+        <Routes>
+          <Route path="/contracts" element={<ContractSearchPage />} />
+          <Route path="/contracts/:id" element={<ContractDetailPage />} />
+          <Route path="/contracts/new" element={<ContractRegisterPage />} />
+        </Routes>
+      </Suspense>
+    </BrowserRouter>
+  );
+}
+
+export { AppRouter };
+```
+
+### 大きなリストの仮想化
+
+**react-windowを使用した仮想スクロール**
+
+```typescript
+import { FixedSizeList } from 'react-window';
+
+interface StudentListProps {
+  students: Student[];
+}
+
+/**
+ * 生徒一覧コンポーネント（仮想スクロール対応）
+ */
+function VirtualizedStudentList({ students }: StudentListProps) {
+  const Row = ({ index, style }: { index: number; style: React.CSSProperties }) => {
+    const student = students[index];
+    return (
+      <div style={style} className="border-b">
+        <StudentCard student={student} />
+      </div>
+    );
+  };
+
+  return (
+    <FixedSizeList
+      height={600}
+      itemCount={students.length}
+      itemSize={80}
+      width="100%"
+    >
+      {Row}
+    </FixedSizeList>
+  );
+}
+
+export { VirtualizedStudentList };
+```
+
+## 9. アクセシビリティ
+
+### ARIA属性の使用
+
+**適切なARIA属性でスクリーンリーダー対応**
+
+```typescript
+/**
+ * モーダルダイアログコンポーネント
+ */
+interface ModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  title: string;
+  children: ReactNode;
+}
+
+function Modal({ isOpen, onClose, title, children }: ModalProps) {
+  // 早期リターン: モーダルが閉じている
+  if (!isOpen) {
+    return null;
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black bg-opacity-50"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="modal-title"
+    >
+      <div className="flex items-center justify-center min-h-screen p-4">
+        <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+          <div className="p-6">
+            <h2 id="modal-title" className="text-xl font-bold">
+              {title}
+            </h2>
+            <div className="mt-4">{children}</div>
+            <button
+              onClick={onClose}
+              className="mt-4 px-4 py-2 bg-gray-200 rounded-md"
+              aria-label="閉じる"
+            >
+              閉じる
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export { Modal };
+```
+
+### キーボードナビゲーション
+
+**キーボード操作のサポート**
+
+```typescript
+/**
+ * ドロップダウンメニューコンポーネント
+ */
+function DropdownMenu({ items }: { items: MenuItem[] }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [focusedIndex, setFocusedIndex] = useState(0);
+
+  const handleKeyDown = (event: React.KeyboardEvent) => {
+    switch (event.key) {
+      case 'ArrowDown':
+        event.preventDefault();
+        setFocusedIndex((prev) => Math.min(prev + 1, items.length - 1));
+        break;
+      case 'ArrowUp':
+        event.preventDefault();
+        setFocusedIndex((prev) => Math.max(prev - 1, 0));
+        break;
+      case 'Enter':
+      case ' ':
+        event.preventDefault();
+        items[focusedIndex].onClick();
+        setIsOpen(false);
+        break;
+      case 'Escape':
+        setIsOpen(false);
+        break;
+    }
+  };
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        onKeyDown={handleKeyDown}
+        aria-expanded={isOpen}
+        aria-haspopup="true"
+      >
+        メニュー
+      </button>
+      {isOpen && (
+        <ul role="menu" className="absolute mt-2 bg-white shadow-lg rounded-md">
+          {items.map((item, index) => (
+            <li
+              key={item.id}
+              role="menuitem"
+              tabIndex={focusedIndex === index ? 0 : -1}
+              className={focusedIndex === index ? 'bg-gray-100' : ''}
+            >
+              {item.label}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+export { DropdownMenu };
+```
+
+## 10. Tailwind CSS ガイド
+
+### クラス名の命名規則
+
+**ユーティリティファーストアプローチ**
+
+```typescript
+// ✅ 良い例: Tailwindユーティリティクラスを使用
+function Card({ title, children }: CardProps) {
+  return (
+    <div className="bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow">
+      <h3 className="text-lg font-semibold text-gray-900 mb-4">{title}</h3>
+      <div className="text-gray-700">{children}</div>
+    </div>
+  );
+}
+
+// ✅ 複雑なスタイルは定数化
+const CARD_BASE_CLASSES = 'bg-white rounded-lg shadow-md p-6';
+const CARD_HOVER_CLASSES = 'hover:shadow-lg transition-shadow';
+const CARD_CLASSES = `${CARD_BASE_CLASSES} ${CARD_HOVER_CLASSES}`;
+
+function CardWithConstants({ title, children }: CardProps) {
+  return (
+    <div className={CARD_CLASSES}>
+      <h3 className="text-lg font-semibold text-gray-900 mb-4">{title}</h3>
+      <div className="text-gray-700">{children}</div>
+    </div>
+  );
+}
+```
+
+### レスポンシブデザイン
+
+**モバイルファーストアプローチ**
+
+```typescript
+/**
+ * レスポンシブグリッドコンポーネント
+ */
+function ResponsiveGrid({ items }: { items: Item[] }) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+      {items.map((item) => (
+        <div key={item.id} className="p-4 bg-white rounded-lg">
+          {item.content}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export { ResponsiveGrid };
+```

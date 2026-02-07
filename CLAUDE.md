@@ -1,0 +1,437 @@
+# AI開発支援ルール集
+
+このドキュメントは、AIを活用した開発プロジェクトのコーディング規約とワークフローを定義します。
+
+---
+
+## プロジェクト概要
+
+**このセクションはプロジェクトに応じてカスタマイズしてください。**
+
+例: Webアプリケーション、APIサービス、モバイルアプリなど
+
+### 技術スタック
+
+詳細は `.cursor/rules/general.mdc` を参照してください。
+
+**推奨技術スタック（カスタマイズ可能）:**
+- **フロントエンド**: React 19.2, TypeScript, Vite
+- **スタイリング**: Tailwind CSS
+- **状態管理**: TanStack Query, Context API
+- **バックエンド**: Express + TypeScript または Next.js API Routes
+- **データベース**: Prisma + MySQL/PostgreSQL
+- **認証**: JWT + bcrypt または Firebase Auth
+- **テスト**: Vitest, Supertest
+- **インフラ**: Google Cloud / AWS / Azure
+
+### ディレクトリ構成
+
+プロジェクトに応じて調整してください。
+
+```
+apps/
+├── api/          # バックエンドAPI (Express)
+└── web/          # フロントエンド (React + Vite)
+
+packages/
+└── shared/       # 共有コード（型定義、スキーマ）
+
+specification/
+├── api/          # API仕様書
+├── database/     # データベース設計書
+└── ui/           # UI画面仕様書
+```
+
+---
+
+## コーディング規約
+
+詳細なコーディング規約は、以下の `.cursor/rules/` ディレクトリのルールファイルを参照してください。
+
+### プロジェクト全般
+
+📄 [**general.mdc**](./.cursor/rules/general.mdc)
+
+- プロジェクト基本設定
+- 技術スタック
+- ディレクトリ構成
+- 言語設定
+- **Import / Export 規約**（パスエイリアス、Named Export）
+
+### TypeScript規約
+
+📄 [**typescript.mdc**](./.cursor/rules/typescript.mdc)
+
+- 変数宣言ルール（`const`のみ使用）
+- 早期リターンパターン
+- JSDocとコメント（日本語で記述）
+- マジックナンバー禁止
+- 型安全性
+- **型定義のベストプラクティス**
+  - Interface vs Type Alias
+  - Readonly修飾子
+  - ジェネリクス
+  - ユーティリティ型
+  - 型ガード
+  - 非同期処理
+  - Discriminated Union
+
+### React規約
+
+📄 [**react.mdc**](./.cursor/rules/react.mdc)
+
+- React 19.2とReact Compilerについて
+- メモ化のルール（React Compilerが自動最適化）
+- コンポーネント構成
+- TanStack Query の使用
+- Vite環境変数
+- セキュリティ
+- **コンポーネント設計パターン**
+  - Presentation / Container パターン
+  - カスタムフック
+  - Context API
+- **フォームハンドリング**（React Hook Form + Zod）
+- **TanStack Query ガイド**
+  - クエリキーの命名規則
+  - オプティミスティック更新
+  - エラーハンドリング
+- **パフォーマンス最適化**
+  - コード分割
+  - 仮想スクロール
+- **アクセシビリティ**
+  - ARIA属性
+  - キーボードナビゲーション
+- **Tailwind CSS ガイド**
+  - クラス名の命名規則
+  - レスポンシブデザイン
+
+### バックエンドAPI規約
+
+📄 [**api.mdc**](./.cursor/rules/api.mdc)
+
+- 入力検証（Zodバリデーション必須）
+- 機密情報の保護
+- エラーハンドリング
+- Prismaクエリ
+- ページネーション
+
+### Prismaマイグレーション規約
+
+📄 [**prisma-migration.mdc**](./.cursor/rules/prisma-migration.mdc)
+
+- **正しいコマンド実行方法**（`npm run prisma:migrate -- --name xxx`）
+- マイグレーション命名規則（英語、snake_case、動詞で始める）
+- 作成前チェックリスト
+- 作成後チェックリスト
+- レビュー観点
+- よくあるエラーと対処法
+
+### Git運用ルール
+
+📄 [**git.mdc**](./.cursor/rules/git.mdc)
+
+- ブランチ構成（`main` / `develop` / `feature/*`）
+- ブランチ命名規則
+- Git worktree運用規約
+- **force-push の禁止**（main/master/developへは絶対禁止）
+- Issue管理ルール
+- GitHub CLI の使用
+- コミットメッセージ規約
+
+### ドキュメント管理
+
+📄 [**documentation.mdc**](./.cursor/rules/documentation.mdc)
+
+- 仕様書作成・更新の基本方針
+- 仕様書作成タイミング
+- 仕様書の品質基準
+
+### コードレビュー基準
+
+📄 [**review.mdc**](./.cursor/rules/review.mdc)
+
+- レビューステータスの判断基準
+- 必須チェック項目
+- レビュー方針
+
+---
+
+## 開発フロー
+
+### 1. 新機能開発の流れ
+
+```bash
+# 1. Issue内容を確認
+gh issue view <issue番号>
+
+# 2. developから作業ブランチを作成（worktreeを使用）
+cd /path/to/project
+git checkout develop
+git pull origin develop
+git worktree add -b issue-<番号>-<機能名> ../project-issue-<番号> develop
+
+# 3. 作業ディレクトリに移動
+cd ../project-issue-<番号>
+
+# 4. 実装を進める
+# - 仕様書を作成/更新（specification/ ディレクトリ）
+# - コードを実装
+# - テストを作成
+
+# 5. コミット
+git add .
+git commit -m "feat: 機能を追加"
+
+# 6. プッシュ
+git push -u origin issue-<番号>-<機能名>
+
+# 7. PRを作成
+gh pr create --base develop --title "タイトル" --body "Closes #<issue番号>"
+
+# 8. レビュー依頼（Cursorコマンド）
+/pr-review
+
+# 9. PRマージ後、worktreeを削除
+cd ../project
+git worktree remove ../project-issue-<番号>
+git branch -d issue-<番号>-<機能名>
+```
+
+### 2. コードレビュー
+
+Cursor上で `/pr-review` コマンドを使用すると、自動的にレビュープロセスが実行されます：
+
+1. ✅ 差分の取得と検証
+2. ✅ PRを自動作成（存在しない場合）
+3. ✅ PRに `@claude レビューして` コメントを追加
+4. ✅ レビュー結果を返却（JSON形式）
+
+---
+
+## Cursor Commands（開発効率化コマンド）
+
+Cursor上で使用できるカスタムコマンドを提供しています。
+
+### `/pr-review` - PRレビュー依頼
+
+現在のブランチとdevelopブランチの差分を自動的に取得し、Claudeにコードレビューを依頼します。
+
+```
+/pr-review
+```
+
+### `/pr-review-branch <base-branch>` - PRレビュー依頼（ブランチ指定）
+
+指定したベースブランチとの差分でPRレビューを依頼します。
+
+```
+/pr-review-branch main
+```
+
+### `/get-issue <issue番号>` - GitHub Issue情報取得
+
+指定したGitHub issueの詳細情報を取得して表示します。
+
+```
+/get-issue 137
+```
+
+### `/create-issue` - GitHub Issue作成
+
+ザックリとした説明から詳細なGitHub Issueを自動生成して作成します。
+
+```
+/create-issue ログイン機能を追加したい
+```
+
+### `/update-issue <issue番号>` - GitHub Issue更新
+
+issueの本文を更新します。
+
+```
+/update-issue 137
+```
+
+### `/resolve-conflicts` - マージコンフリクト解決
+
+gitマージコンフリクトの解決を支援します。
+
+```
+/resolve-conflicts
+```
+
+---
+
+## Claude Code スキル
+
+Claude Code上で使用できるスキルコマンドです。
+
+### `issue` - Issue実装フロー
+
+指定したIssueを読み解いて実装し、PRを作成してレビューリクエストを送ります。
+
+```
+/issue 123
+```
+
+### `test` - テストコマンド
+
+現在のブランチを表示するテストコマンドです。
+
+```
+/test
+```
+
+---
+
+## クイックリファレンス
+
+### よく使うパターン
+
+#### Reactコンポーネントの基本構成
+
+```typescript
+import type { ReactNode } from 'react';
+
+interface ComponentProps {
+  propName: string;
+  children?: ReactNode;
+}
+
+/**
+ * コンポーネントの説明
+ *
+ * @param props - コンポーネントのProps
+ * @param props.propName - プロパティの説明
+ * @returns コンポーネント
+ */
+function Component({ propName, children }: ComponentProps) {
+  // 早期リターン: 条件チェック
+  if (!propName) {
+    return null;
+  }
+
+  // メインの描画
+  return (
+    <div>
+      {propName}
+      {children}
+    </div>
+  );
+}
+
+export { Component };
+```
+
+#### カスタムフックの基本構成
+
+```typescript
+/**
+ * フックの説明
+ *
+ * @param param - パラメータの説明
+ * @returns フックの戻り値
+ */
+function useCustomHook(param: string) {
+  const [state, setState] = useState<string>(param);
+
+  // React Compilerが自動最適化するため、useCallbackは不要
+  const handleUpdate = (newValue: string) => {
+    setState(newValue);
+  };
+
+  return { state, handleUpdate };
+}
+
+export { useCustomHook };
+```
+
+#### API関数の基本構成
+
+```typescript
+/**
+ * API関数の説明
+ *
+ * @param param - パラメータの説明
+ * @returns APIレスポンス
+ * @throws {ApiError} API呼び出しが失敗した場合
+ */
+async function fetchData(param: string): Promise<DataType> {
+  const response = await fetch(`/api/data/${param}`);
+
+  if (!response.ok) {
+    throw new ApiError(`Failed to fetch data: ${response.statusText}`);
+  }
+
+  return await response.json();
+}
+
+export { fetchData };
+```
+
+---
+
+## セットアップ方法
+
+### 1. このリポジトリをプロジェクトに統合
+
+#### オプション A: 直接コピー
+
+```bash
+# .cursor/ ディレクトリをコピー
+cp -r ai-dev-rules/.cursor /path/to/your-project/
+
+# .claude/ ディレクトリをコピー
+cp -r ai-dev-rules/.claude /path/to/your-project/
+
+# CLAUDE.md をコピー（必要に応じてカスタマイズ）
+cp ai-dev-rules/CLAUDE.md /path/to/your-project/
+```
+
+#### オプション B: Git Submodule として追加
+
+```bash
+cd /path/to/your-project
+git submodule add https://github.com/your-username/ai-dev-rules .ai-dev-rules
+
+# シンボリックリンクを作成
+ln -s .ai-dev-rules/.cursor .cursor
+ln -s .ai-dev-rules/.claude .claude
+ln -s .ai-dev-rules/CLAUDE.md CLAUDE.md
+```
+
+### 2. プロジェクト固有の設定をカスタマイズ
+
+- `CLAUDE.md` の「プロジェクト概要」セクションを編集
+- `.cursor/rules/general.mdc` の技術スタックを編集
+- 不要なルールファイルを削除（例: Prismaを使わない場合は `prisma-migration.mdc` を削除）
+
+### 3. GitHubリポジトリ名を設定
+
+`.cursor/commands/` 内のコマンドファイルで、リポジトリ名を置換：
+
+```bash
+# "kizuki-dsd/manabi" を自分のリポジトリ名に置換
+find .cursor/commands -type f -name "*.md" -exec sed -i '' 's/kizuki-dsd\/manabi/your-org\/your-repo/g' {} +
+```
+
+### 4. Claude Code設定（オプション）
+
+`.claude/settings.local.json` を作成して、プロジェクト固有の権限を設定してください。
+
+---
+
+## 更新履歴
+
+- 2026-02-07: AI開発支援ルール集として汎用化テンプレートを作成
+  - manabiプロジェクトから規約・コマンドを抽出
+  - プロジェクト固有の情報を汎用化
+  - セットアップガイドを追加
+
+---
+
+## ライセンス
+
+MIT License
+
+このルール集は自由にカスタマイズして使用できます。

@@ -1,0 +1,174 @@
+# Prismaマイグレーション作成ルール
+
+## 重要: 正しいコマンド実行方法
+
+### ❌ よくある間違い
+
+```bash
+# ❌ 引数が正しく渡らず、マイグレーション名が空になる
+npm run db:migrate dev --name add_foreign_keys_to_courses
+# → 結果: 20260113052120_ という名前でマイグレーションが作成される
+```
+
+### ✅ 正しい実行方法
+
+```bash
+# 必ず packages/database ディレクトリで実行
+cd packages/database
+
+# 方法1: npm run + -- を使用（推奨）
+npm run db:migrate -- --name add_foreign_keys_to_courses
+
+# 方法2: npx を直接使用
+npx prisma migrate dev --name add_foreign_keys_to_courses
+```
+
+**重要**: `npm run db:migrate` の後に `--` を入れることで、引数が正しく渡されます。
+
+## マイグレーション命名規則
+
+### 基本ルール
+
+1. **英語のみ**（日本語禁止）
+2. **snake_case形式**
+3. **動詞で始める**（add, create, update, remove など）
+4. **具体的な変更内容**（何を・どうするか）
+5. **50文字以内**
+
+### 良い例
+
+```bash
+✅ add_students_table
+✅ add_email_to_users
+✅ add_fk_contracts_to_students
+✅ update_contract_status_enum
+✅ add_index_on_contract_number
+✅ remove_deprecated_columns
+```
+
+### 悪い例
+
+```bash
+❌ 実施時刻_              # 日本語
+❌ 20260113052120_       # マイグレーション名が空
+❌ migration             # 内容不明
+❌ add column            # スペース使用
+❌ add-foreign-keys      # ハイフン使用
+❌ addForeignKeys        # camelCase
+```
+
+## マイグレーション作成前チェックリスト
+
+### 必須確認事項
+
+- [ ] `packages/database` ディレクトリで作業している
+- [ ] `prisma/schema.prisma` の変更内容を確認済み
+- [ ] `DATABASE_DESIGN.md` と一致している
+- [ ] リレーション（`@relation`）が正しく定義されている
+- [ ] マイグレーション名が命名規則に準拠している
+- [ ] NOT NULL制約を追加する場合、既存データへの影響を確認済み
+
+## マイグレーション作成手順
+
+### 1. Prismaスキーマを編集
+
+```typescript
+// prisma/schema.prisma
+model Student {
+  id        Int      @id @default(autoincrement()) @map("student_id")
+  email     String   @db.VarChar(255) // 追加
+  createdAt DateTime @default(now()) @map("created_at")
+  @@map("students")
+}
+```
+
+### 2. マイグレーション作成
+
+```bash
+cd packages/database
+npm run db:migrate -- --name add_email_to_students
+```
+
+### 3. 生成されたファイルを確認
+
+```bash
+# マイグレーション名を確認（20260113052120_add_email_to_students/ となっているはず）
+ls prisma/migrations/
+
+# SQL内容を確認
+cat prisma/migrations/$(ls -t prisma/migrations/ | head -1)/migration.sql
+```
+
+## マイグレーション作成後チェックリスト
+
+### 必須確認事項
+
+- [ ] マイグレーション名が `20260113052120_` でない（空でない）
+- [ ] SQL文が意図した変更と一致している
+- [ ] `npm run db:generate` を実行済み
+- [ ] 型定義に新しいカラムが含まれている
+
+### マイグレーション名が空の場合の対処
+
+```bash
+# 誤って作成されたマイグレーションを削除
+rm -rf prisma/migrations/20260113052120_
+
+# 正しいコマンドで再実行
+npm run db:migrate -- --name add_email_to_students
+```
+
+## レビュー観点
+
+### PRレビュー時の確認事項
+
+- [ ] マイグレーション名が変更内容を表現している
+- [ ] 命名規則に準拠している（`20260113052120_` になっていない）
+- [ ] SQL文が安全である（データ損失リスクがない）
+- [ ] 外部キー制約・インデックスが正しく定義されている
+- [ ] `DATABASE_DESIGN.md` と一致している
+- [ ] 必要に応じて設計書を更新している
+
+## よくあるエラーと対処法
+
+### エラー1: マイグレーション名が空（`20260113052120_`）
+
+**原因**: `npm run db:migrate dev --name xxx` で実行した
+
+**対処**: 上記「マイグレーション名が空の場合の対処」を参照
+
+### エラー2: Foreign key constraint fails
+
+**対処**: 参照先テーブル・カラムの存在確認、既存データの整合性確認
+
+### エラー3: Column cannot be null
+
+**対処**: デフォルト値を設定するか、一旦NULL許可で追加してから制約追加
+
+```sql
+-- パターンA: デフォルト値を設定
+ALTER TABLE students ADD COLUMN email VARCHAR(255) NOT NULL DEFAULT 'unknown@example.com';
+
+-- パターンB: 段階的に追加
+ALTER TABLE students ADD COLUMN email VARCHAR(255);
+UPDATE students SET email = 'unknown@example.com' WHERE email IS NULL;
+ALTER TABLE students MODIFY COLUMN email VARCHAR(255) NOT NULL;
+```
+
+### エラー4: Prisma Client が古い型定義を使っている
+
+**対処**: `npm run db:generate` を実行
+
+## 本番環境への適用（概要）
+
+1. **事前準備**: データベースバックアップ、ステージング環境での動作確認
+2. **適用**: `npx prisma migrate deploy`（環境変数を本番用に設定）
+3. **確認**: アプリケーション動作確認、エラーログ確認
+
+詳細は別途運用ドキュメントを参照。
+
+## 参考資料
+
+- [Prisma公式ドキュメント](https://www.prisma.io/docs/concepts/components/prisma-migrate)
+- `specification/database/DATABASE_DESIGN.md`
+- `specification/database/DB_DESIGN_DECISIONS.md`

@@ -1,0 +1,436 @@
+---
+description: バックエンドAPI開発規約
+globs:
+  - "apps/api/**/*.ts"
+alwaysApply: true
+---
+
+# バックエンドAPI規約
+
+## 技術スタック
+
+- Express + TypeScript
+- Prisma ORM
+- MySQL 8.0
+- JWT認証 + bcrypt
+- Zod バリデーション
+
+## 入力検証
+
+**すべてのAPIエンドポイントでZodを使用したバリデーション必須**
+
+```typescript
+import { z } from 'zod';
+
+import { db } from '@/lib/prisma';
+
+import type { Student } from '@/types/student';
+
+const StudentUpdateSchema = z.object({
+  name: z.string().min(1, '生徒名は必須です').max(50, '生徒名は50文字以内で入力してください'),
+  email: z.string().email('有効なメールアドレスを入力してください'),
+  phoneNumber: z.string().regex(/^[0-9-]+$/, '電話番号は数字とハイフンのみ使用できます').optional(),
+});
+
+/**
+ * 生徒情報を更新する
+ *
+ * @param studentId - 更新対象の生徒ID
+ * @param data - 更新データ（未検証）
+ * @returns 更新された生徒情報
+ * @throws {z.ZodError} バリデーションエラー時
+ */
+async function updateStudent(studentId: string, data: unknown): Promise<Student> {
+  // 入力検証: スキーマに合わない場合はエラーをスロー
+  const validatedData = StudentUpdateSchema.parse(data);
+  
+  const updatedStudent = await db.student.update({
+    where: { id: studentId },
+    data: validatedData,
+  });
+  
+  return updatedStudent;
+}
+
+export { updateStudent };
+```
+
+## 機密情報の保護
+
+```typescript
+import type { Request, Response } from 'express';
+
+import { db } from '@/lib/prisma';
+
+// ❌ 違反: 機密情報を含めてしまう
+async function getUserBad(req: Request, res: Response): Promise<void> {
+  const { userId } = req.params;
+  
+  const user = await db.user.findUnique({ where: { id: userId } });
+  
+  // パスワードハッシュやAPIキーも含めて返してしまう
+  res.json(user);
+}
+
+// ✅ 正しい: 必要な情報のみ返す
+async function getUser(req: Request, res: Response): Promise<void> {
+  const { userId } = req.params;
+  
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      createdAt: true,
+      // password, apiKeyなどは除外
+    },
+  });
+  
+  // 早期リターン: ユーザーが存在しない
+  if (!user) {
+    res.status(404).json({ error: 'ユーザーが見つかりません' });
+    return;
+  }
+  
+  res.json(user);
+}
+
+export { getUser };
+```
+
+## エラーハンドリング
+
+```typescript
+import type { Request, Response } from 'express';
+
+import { db } from '@/lib/prisma';
+import { AppError } from '@/errors/AppError';
+
+/**
+ * 契約情報を取得するAPIハンドラ
+ *
+ * @param req - リクエストオブジェクト
+ * @param res - レスポンスオブジェクト
+ */
+async function getContract(req: Request, res: Response): Promise<void> {
+  const { contractId } = req.params;
+
+  // 早期リターン: IDが不正
+  if (!contractId) {
+    res.status(400).json({ error: '契約IDが必要です' });
+    return;
+  }
+
+  try {
+    const contract = await db.contract.findUnique({
+      where: { id: contractId },
+      select: {
+        id: true,
+        contractNumber: true,
+        status: true,
+        startDate: true,
+        endDate: true,
+        monthlyFee: true,
+        student: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+      },
+    });
+
+    // 早期リターン: 契約が存在しない
+    if (!contract) {
+      res.status(404).json({ error: '契約が見つかりません' });
+      return;
+    }
+
+    res.json(contract);
+  } catch (error) {
+    // エラーログを出力
+    console.error('契約取得エラー:', error);
+    
+    if (error instanceof AppError) {
+      res.status(error.statusCode).json({ error: error.message });
+      return;
+    }
+    
+    res.status(500).json({ error: 'サーバーエラーが発生しました' });
+  }
+}
+
+export { getContract };
+```
+
+## Prismaクエリ
+
+```typescript
+import { db } from '@/lib/prisma';
+
+import type { ContractStatus } from '@/types/contract';
+
+// ページネーションのデフォルト設定
+const DEFAULT_PAGE_SIZE = 20;
+const MAX_PAGE_SIZE = 100;
+
+/**
+ * 契約一覧を取得する
+ *
+ * @param status - フィルタリングするステータス
+ * @returns 契約一覧
+ */
+async function getContracts(status?: ContractStatus) {
+  // ✅ 必要なフィールドのみ取得
+  const contracts = await db.contract.findMany({
+    select: {
+      id: true,
+      contractNumber: true,
+      status: true,
+      startDate: true,
+      monthlyFee: true,
+      student: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+        },
+      },
+    },
+    where: status ? { status } : undefined,
+    orderBy: { createdAt: 'desc' },
+  });
+
+  return contracts;
+}
+
+/**
+ * ページネーションを使用して契約一覧を取得する
+ *
+ * @param page - ページ番号（1から始まる）
+ * @param pageSize - 1ページあたりの件数
+ * @returns 契約一覧とページネーション情報
+ */
+async function getContractsPaginated(
+  page: number,
+  pageSize: number = DEFAULT_PAGE_SIZE
+) {
+  // ページサイズの検証
+  const validatedPageSize = Math.min(pageSize, MAX_PAGE_SIZE);
+  const validatedPage = Math.max(page, 1);
+
+  // 総件数を取得
+  const total = await db.contract.count();
+
+  // ページネーション付きでデータを取得
+  const contracts = await db.contract.findMany({
+    select: {
+      id: true,
+      contractNumber: true,
+      status: true,
+      startDate: true,
+      monthlyFee: true,
+      student: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+    },
+    skip: (validatedPage - 1) * validatedPageSize,
+    take: validatedPageSize,
+    orderBy: { createdAt: 'desc' },
+  });
+
+  // ページネーション情報を計算
+  const totalPages = Math.ceil(total / validatedPageSize);
+  const hasNextPage = validatedPage < totalPages;
+  const hasPreviousPage = validatedPage > 1;
+
+  return {
+    data: contracts,
+    pagination: {
+      page: validatedPage,
+      pageSize: validatedPageSize,
+      total,
+      totalPages,
+      hasNextPage,
+      hasPreviousPage,
+    },
+  };
+}
+
+export { getContracts, getContractsPaginated };
+```
+
+## エラーハンドリングの統一ルール
+
+**すべてのAPIエンドポイントでAppErrorを使用した統一的なエラーハンドリング**
+
+```typescript
+import { NotFoundError } from '@/errors/AppError';
+
+/**
+ * 生徒情報を取得する
+ *
+ * @param studentId - 取得対象の生徒ID
+ * @returns 生徒情報
+ * @throws {NotFoundError} 生徒が見つからない場合
+ */
+async function getStudent(studentId: string): Promise<Student> {
+  const student = await db.student.findUnique({
+    where: { id: studentId },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+    },
+  });
+
+  // 早期リターン: 生徒が存在しない
+  if (!student) {
+    throw new NotFoundError('STUDENT_NOT_FOUND', '指定された生徒が見つかりません');
+  }
+
+  return student;
+}
+```
+
+### エラーハンドリングの優先順位
+
+1. **AppError（自作エラー）** → そのままレスポンス
+2. **ZodError（バリデーションエラー）** → ValidationError形式に変換（グローバルエラーハンドラで自動処理）
+3. **PrismaClientKnownRequestError** → 適切なエラーに変換（グローバルエラーハンドラで自動処理）
+4. **その他のエラー** → 500 INTERNAL_SERVER_ERROR（グローバルエラーハンドラで自動処理）
+
+### ログ出力
+
+**開発環境でのみエラーログを出力**
+
+```typescript
+// 開発環境ではエラーログを出力
+if (process.env.NODE_ENV === 'development') {
+  console.error('エラー:', error);
+}
+```
+
+**本番環境では機密情報を含めない**
+
+```typescript
+// 本番環境ではスタックトレースを含む詳細情報を返さない
+const message = process.env.NODE_ENV === 'production'
+  ? 'サーバーエラーが発生しました'
+  : error.message;
+```
+
+## テストコード規約
+
+**すべてのAPIエンドポイントとビジネスロジックにテストを追加**
+
+### テストフレームワーク
+
+- **Vitest**: ユニットテスト・統合テスト
+- **Supertest**: APIエンドポイントのテスト
+
+### テストファイルの配置
+
+```
+apps/api/src/
+├── routes/
+│   ├── students.ts
+│   └── __tests__/
+│       └── students.test.ts
+├── lib/
+│   ├── prisma-helpers.ts
+│   └── __tests__/
+│       └── prisma-helpers.test.ts
+```
+
+### テストコードの基本構成
+
+```typescript
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import request from 'supertest';
+import express from 'express';
+import { errorHandler } from '@/middleware/errorHandler';
+import studentRoutes from '@/routes/students';
+
+// Prismaクライアントをモック化
+vi.mock('@/lib/prisma', () => ({
+  prisma: {
+    student: {
+      findUnique: vi.fn(),
+    },
+  },
+}));
+
+// 認証ミドルウェアをモック化
+vi.mock('@/middleware/auth', () => ({
+  authenticate: vi.fn((req, res, next) => next()),
+}));
+
+describe('生徒情報取得エンドポイント', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('正常系: 生徒情報を取得できる', async () => {
+    // テスト実装
+  });
+
+  it('異常系: 存在しない生徒IDの場合、404エラーを返す', async () => {
+    // テスト実装
+  });
+});
+```
+
+### テストカバレッジ
+
+- **目標**: 90%以上
+- **必須**: 正常系・異常系・境界値テスト
+- **推奨**: エッジケースのテスト
+
+## 環境変数の管理
+
+**環境変数は必ず定数化し、型安全性を確保**
+
+```typescript
+// ❌ 悪い例: 直接process.envを使用
+const dbUrl = process.env.DATABASE_URL;
+
+// ✅ 良い例: 定数化して型安全性を確保
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) {
+  throw new Error('DATABASE_URL is not defined');
+}
+```
+
+### 環境変数の検証
+
+**アプリケーション起動時に環境変数を検証**
+
+```typescript
+/**
+ * 環境変数を検証する
+ *
+ * @throws {Error} 必須の環境変数が設定されていない場合
+ */
+function validateEnv(): void {
+  const requiredEnvVars = ['DATABASE_URL', 'JWT_SECRET', 'API_PORT'];
+  
+  for (const envVar of requiredEnvVars) {
+    if (!process.env[envVar]) {
+      throw new Error(`${envVar} is not defined`);
+    }
+  }
+}
+
+// アプリケーション起動時に実行
+validateEnv();
+```

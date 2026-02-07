@@ -1,0 +1,213 @@
+---
+description: プロジェクトの全般的な設定と技術スタック
+globs:
+alwaysApply: true
+---
+
+# プロジェクト基本設定
+
+## 技術スタック
+
+このセクションはプロジェクトに応じてカスタマイズしてください。
+
+**例: フルスタックWebアプリケーション**
+- **フロントエンド**: React 19.2, TypeScript, Vite
+- **スタイリング**: Tailwind CSS
+- **状態管理**: TanStack Query, Context API + useReducer
+- **フォーム**: React Hook Form + Zod
+- **ルーティング**: React Router
+- **バックエンド**: Express + TypeScript
+- **データベース**: MySQL 8.0 + Prisma (または PostgreSQL)
+- **認証**: JWT + bcrypt
+- **テスト**: Vitest, Supertest
+- **インフラ**: Google Cloud / AWS / Azure
+
+## ディレクトリ構成
+
+プロジェクトに応じて調整してください。
+
+**モノレポ構成の例:**
+```
+apps/
+├── api/          # バックエンドAPI
+└── web/          # フロントエンド
+
+packages/
+└── shared/       # 共有コード（型定義、スキーマ）
+
+specification/
+├── api/          # API仕様書
+├── database/     # データベース設計書
+└── ui/           # UI画面仕様書
+```
+
+## 言語設定
+
+- **コメント・JSDoc**: 日本語で記述
+- **変数名・関数名**: 英語（キャメルケース/パスカルケース）
+- **定数名**: UPPER_SNAKE_CASE
+
+## Import / Export 規約
+
+### Import文の記述ルール
+
+**必ずパスエイリアスを使用する**
+
+```typescript
+// ❌ 悪い例: 相対パスの使用
+import { Button } from '../../../components/common/Button';
+import { useContract } from '../../hooks/contract/useContract';
+import type { Contract } from '../../types/contract';
+
+// ✅ 良い例: パスエイリアスの使用
+import { Button } from '@/components/common/Button';
+import { useContract } from '@/hooks/contract/useContract';
+import type { Contract } from '@/types/contract';
+```
+
+**型インポートは `import type` を使用する**
+
+```typescript
+// ❌ 悪い例: 通常のimport
+import { Contract } from '@/types/contract';
+
+// ✅ 良い例: import type
+import type { Contract } from '@/types/contract';
+```
+
+**インポート順序の統一**
+
+1. React関連
+2. 外部ライブラリ
+3. 内部モジュール（`@/`）
+4. 型定義（`import type`）
+5. 相対パス（最小限に）
+
+```typescript
+// ✅ 良い例: 整理されたimport
+import { useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { zodResolver } from '@hookform/resolvers/zod';
+
+import { Button } from '@/components/common/Button';
+import { useContract } from '@/hooks/contract/useContract';
+import { formatDate } from '@/utils/format';
+
+import type { Contract } from '@/types/contract';
+import type { ReactNode } from 'react';
+```
+
+### Export文の記述ルール
+
+**Named Exportを使用する（Default Exportは使用しない）**
+
+```typescript
+// ❌ 悪い例: export default
+function Button({ children }: ButtonProps) {
+  return <button>{children}</button>;
+}
+
+export default Button;
+
+// ✅ 良い例: インライン名前付きエクスポート（推奨）
+export function Button({ children }: ButtonProps) {
+  return <button>{children}</button>;
+}
+
+// ✅ 許容: 関数を定義して最後にexport
+function IconButton({ children }: IconButtonProps) {
+  return <button>{children}</button>;
+}
+
+export { IconButton };
+```
+
+**推奨: インライン名前付きエクスポート**
+
+インライン形式は以下のメリットがあります：
+- 簡潔で読みやすい
+- エクスポート対象が明確
+- TypeScript/JavaScriptのベストプラクティスに準拠
+- 関数名を1回だけ書けば良い
+
+```typescript
+// ✅ 関数のエクスポート
+export function formatDate(dateString: string): string {
+  // 実装
+}
+
+// ✅ 定数のエクスポート
+export const API_BASE_URL = 'https://api.example.com';
+
+// ✅ クラスのエクスポート
+export class ApiError extends Error {
+  constructor(message: string) {
+    super(message);
+  }
+}
+```
+
+**型定義のエクスポート**
+
+型定義は `export type` を使用してエクスポートします：
+
+```typescript
+// ✅ 型定義のインラインエクスポート（推奨）
+export type ButtonProps = {
+  children: ReactNode;
+  variant?: 'primary' | 'secondary';
+};
+
+export interface Student {
+  id: string;
+  name: string;
+}
+
+// ✅ 型定義を最後にまとめてexport
+type ContractStatus = 'draft' | 'confirmed' | 'active';
+interface Contract {
+  id: string;
+  status: ContractStatus;
+}
+
+export type { ContractStatus, Contract };
+```
+
+**Default Exportを使用しない理由**
+
+- リファクタリング時の安全性が低い（名前の一貫性が保証されない）
+- IDEのコード補完が効きにくい
+- インポート時の名前が統一されない（チームでの一貫性が保てない）
+- 複数のエクスポートを扱いにくい
+
+### パスエイリアス設定
+
+**Vite設定（`vite.config.ts`）**
+
+```typescript
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import path from 'path';
+
+export default defineConfig({
+  plugins: [react()],
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './src'),
+    },
+  },
+});
+```
+
+**TypeScript設定（`tsconfig.json`）**
+
+```json
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  }
+}
+```

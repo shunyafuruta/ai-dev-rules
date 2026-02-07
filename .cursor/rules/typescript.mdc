@@ -1,0 +1,1016 @@
+---
+description: TypeScriptコーディング規約
+globs:
+alwaysApply: true
+---
+
+# TypeScriptコーディング規約
+
+## 重要: React 19.2とReact Compilerについて
+
+このプロジェクトはReact 19.2とReact Compilerを使用しています。
+
+**React Compilerの前提条件**：
+- **不変性**: propsやstateを直接変更しない（このルールはすでに準拠済み）
+- **冪等性**: 同じpropsで常に同じ結果を返す
+- **`const`のみ使用**: `let`は使用禁止（下記のルール1で規定）
+
+React Compilerが効果的に動作するため、以下のルールは特に重要です。
+
+## 1. 変数宣言ルール
+
+**`const`を使用（`let`は使用禁止）**
+
+```typescript
+// ❌ 悪い例
+let count = 0;
+count = count + 1;
+
+let user = null;
+if (data) {
+  user = data.user;
+}
+
+// ✅ 良い例
+const count = 0;
+const newCount = count + 1;
+
+const user = data ? data.user : null;
+
+// ✅ 配列操作
+const items = [1, 2, 3];
+const newItems = [...items, 4];
+
+// ✅ オブジェクト操作
+const user = { name: 'Alice', age: 20 };
+const updatedUser = { ...user, age: 21 };
+```
+
+## 2. 早期リターンパターン
+
+**ネストを減らし、フラットなコード構造を保つ**
+
+```typescript
+// ❌ 悪い例（ネストが深い）
+function processContract(contract: Contract | null): ContractResult {
+  if (contract) {
+    if (contract.status === 'confirmed') {
+      if (contract.payment) {
+        // 処理
+      }
+    }
+  }
+}
+
+// ✅ 良い例（早期リターン）
+function processContract(contract: Contract | null): ContractResult {
+  if (!contract) {
+    return { success: false, error: 'Contract not found' };
+  }
+
+  if (contract.status !== 'confirmed') {
+    return { success: false, error: 'Contract not confirmed' };
+  }
+
+  if (!contract.payment) {
+    return { success: false, error: 'Payment not found' };
+  }
+
+  // メインの処理（ネストなし）
+  return { success: true, data: contract };
+}
+```
+
+## 3. JSDocとコメント
+
+**すべての関数に必ずJSDocを記載する（日本語で）**
+
+```typescript
+/**
+ * 契約情報を処理し、ステータスを更新する
+ *
+ * @param contract - 処理対象の契約情報。nullの場合はエラーを返す
+ * @returns 処理結果。成功時は契約データ、失敗時はエラーメッセージを含む
+ *
+ * @example
+ * ```typescript
+ * const result = processContract(contract);
+ * if (result.success) {
+ *   console.log('契約が完了しました', result.data);
+ * }
+ * ```
+ */
+function processContract(contract: Contract | null): ContractResult {
+  // 早期リターン: contractが存在しない
+  if (!contract) {
+    return { success: false, error: 'Contract not found' };
+  }
+  // ...
+}
+```
+
+### JSDoc必須項目
+- 関数の目的と概要説明（日本語）
+- `@param` ですべてのパラメータを説明
+- `@returns` で戻り値の型と説明
+- 複雑な関数は `@example` でサンプルコード
+
+### 推奨項目
+- `@throws` でスローされる可能性のあるエラー
+- 非同期関数は Promise の内容を明記
+
+## 4. マジックナンバーは使わない（厳格）
+
+**数値や文字列リテラルは必ず定数化する**
+
+マジックナンバーとは、コード中に直接埋め込まれた数値・文字列リテラルのことで、その意味が不明瞭なものを指します。  
+このプロジェクトでは、**可読性・保守性・バグ防止**のため、マジックナンバーの使用を厳格に禁止します。
+
+### 定数化が必須の値（例外なし）
+
+以下のカテゴリに該当する値は**必ず定数化**してください。
+
+#### 1. ビジネスロジックに関連する全ての数値
+
+```typescript
+// ❌ 悪い例
+if (months < 6) {
+  return 10000;
+}
+
+// ✅ 良い例
+const SHORT_COURSE_THRESHOLD_MONTHS = 6;
+const SHORT_COURSE_FEE = 10000;
+
+if (months < SHORT_COURSE_THRESHOLD_MONTHS) {
+  return SHORT_COURSE_FEE;
+}
+```
+
+- 料金、割引率、手数料
+- 契約期間、支払期限
+- 在庫数、定員、最大・最小値
+
+#### 2. システム設定値
+
+```typescript
+// ❌ 悪い例
+const contracts = await db.contract.findMany({
+  take: 20,
+  skip: page * 20,
+});
+
+// ✅ 良い例
+const DEFAULT_PAGE_SIZE = 20;
+
+const contracts = await db.contract.findMany({
+  take: DEFAULT_PAGE_SIZE,
+  skip: page * DEFAULT_PAGE_SIZE,
+});
+```
+
+- ページサイズ、表示件数
+- タイムアウト時間
+- リトライ回数
+- バッファサイズ
+
+#### 3. バリデーション閾値
+
+```typescript
+// ❌ 悪い例
+if (studentName.length > 50) {
+  throw new Error('名前が長すぎます');
+}
+
+// ✅ 良い例
+const STUDENT_NAME_MAX_LENGTH = 50;
+
+if (studentName.length > STUDENT_NAME_MAX_LENGTH) {
+  throw new Error(`名前は${STUDENT_NAME_MAX_LENGTH}文字以内で入力してください`);
+}
+```
+
+- 文字数制限
+- 数値の範囲
+- ファイルサイズ制限
+
+#### 4. ステータスコード・識別子
+
+```typescript
+// ❌ 悪い例
+if (response.status === 200) {
+  // 成功処理
+}
+
+// ✅ 良い例
+const HTTP_STATUS_OK = 200;
+
+if (response.status === HTTP_STATUS_OK) {
+  // 成功処理
+}
+
+// ✅ より良い例: 複数のステータスコードをまとめる
+const HTTP_STATUS = {
+  OK: 200,
+  CREATED: 201,
+  BAD_REQUEST: 400,
+  UNAUTHORIZED: 401,
+  NOT_FOUND: 404,
+  INTERNAL_SERVER_ERROR: 500,
+} as const;
+
+if (response.status === HTTP_STATUS.OK) {
+  // 成功処理
+}
+```
+
+- HTTPステータスコード
+- エラーコード
+- 種別を表す文字列・数値
+
+#### 5. 時間関連の値
+
+```typescript
+// ❌ 悪い例
+setTimeout(() => {
+  console.log('timeout');
+}, 5000);
+
+const expiresAt = Date.now() + 86400000;
+
+// ✅ 良い例
+const API_TIMEOUT_MS = 5000;
+const ONE_DAY_MS = 24 * 60 * 60 * 1000; // 86400000
+
+setTimeout(() => {
+  console.log('timeout');
+}, API_TIMEOUT_MS);
+
+const expiresAt = Date.now() + ONE_DAY_MS;
+```
+
+- ミリ秒、秒、分、時間、日数
+- タイムスタンプの計算に使う係数
+
+### 定数化が不要な値（極めて限定的）
+
+以下の場合**のみ**、定数化は不要です。
+
+#### 1. 数学的に自明な値
+
+```typescript
+// ✅ 配列の空チェック
+if (array.length === 0) {
+  return;
+}
+
+// ✅ 増減の単位（constで定義した変数に対して）
+const count = 0;
+const newCount = count + 1; // 新しい変数として定義
+
+// ✅ 真偽値の反転
+const isDisabled = !isEnabled;
+
+// ✅ 配列の最初・最後
+const first = array[0];
+const last = array[array.length - 1];
+
+// ✅ パーセンテージの計算（明らかな場合）
+const percentage = (value / total) * 100;
+```
+
+#### 2. 型システムで保証される値
+
+```typescript
+// ✅ 関数のデフォルト引数（型で明示されている場合）
+function greet(name: string = 'ゲスト') {
+  return `こんにちは、${name}さん`;
+}
+```
+
+### 定数の配置とネーミング規則
+
+#### 配置場所
+
+```
+apps/web/src/constants/
+├── api.ts           # APIエンドポイント、タイムアウト、HTTPステータス
+├── pagination.ts    # ページネーション設定
+├── validation.ts    # バリデーション閾値
+├── time.ts          # 時間関連の定数
+└── business.ts      # ビジネスロジック関連（料金、期間など）
+```
+
+#### ネーミング規則
+
+**UPPER_SNAKE_CASE を使用し、目的を明確にする**
+
+```typescript
+// ✅ 良い定数名: 目的が明確
+const DEFAULT_PAGE_SIZE = 20;
+const MAX_PAGE_SIZE = 100;
+const STUDENT_NAME_MAX_LENGTH = 50;
+const API_TIMEOUT_MS = 5000;
+const CONTRACT_PAYMENT_DEADLINE_DAYS = 7;
+
+// ❌ 悪い定数名: 値を繰り返しているだけ
+const TWENTY = 20;
+const ONE_HUNDRED = 100;
+const FIVE_THOUSAND = 5000;
+```
+
+#### 関連する定数はグループ化
+
+```typescript
+// ✅ オブジェクトでグループ化（as const を使用）
+const PAGINATION = {
+  DEFAULT_PAGE_SIZE: 20,
+  MAX_PAGE_SIZE: 100,
+  MIN_PAGE_SIZE: 1,
+} as const;
+
+const STUDENT_VALIDATION = {
+  NAME_MIN_LENGTH: 1,
+  NAME_MAX_LENGTH: 50,
+  EMAIL_MAX_LENGTH: 255,
+  PHONE_MAX_LENGTH: 20,
+} as const;
+
+const HTTP_STATUS = {
+  OK: 200,
+  CREATED: 201,
+  BAD_REQUEST: 400,
+  UNAUTHORIZED: 401,
+  NOT_FOUND: 404,
+  INTERNAL_SERVER_ERROR: 500,
+} as const;
+```
+
+#### JSDocを必ず追加
+
+```typescript
+/**
+ * ページネーション設定
+ *
+ * @property DEFAULT_PAGE_SIZE - デフォルトの1ページあたりの表示件数
+ * @property MAX_PAGE_SIZE - 1ページあたりの最大表示件数（パフォーマンス保護）
+ * @property MIN_PAGE_SIZE - 1ページあたりの最小表示件数
+ */
+const PAGINATION = {
+  DEFAULT_PAGE_SIZE: 20,
+  MAX_PAGE_SIZE: 100,
+  MIN_PAGE_SIZE: 1,
+} as const;
+
+/**
+ * APIタイムアウト設定（ミリ秒）
+ */
+const API_TIMEOUT_MS = 5000;
+
+/**
+ * 契約の支払期限（日数）
+ */
+const CONTRACT_PAYMENT_DEADLINE_DAYS = 7;
+```
+
+### よくある違反例と修正例
+
+#### 例1: ページネーション
+
+```typescript
+// ❌ 悪い例
+const { data, isLoading } = useQuery({
+  queryKey: ['contracts', page],
+  queryFn: () => fetchContracts(page, 20),
+});
+
+// ✅ 良い例
+import { PAGINATION } from '@/constants/pagination';
+
+const { data, isLoading } = useQuery({
+  queryKey: ['contracts', page],
+  queryFn: () => fetchContracts(page, PAGINATION.DEFAULT_PAGE_SIZE),
+});
+```
+
+#### 例2: バリデーション
+
+```typescript
+// ❌ 悪い例
+const StudentSchema = z.object({
+  name: z.string().min(1).max(50),
+  email: z.string().email().max(255),
+});
+
+// ✅ 良い例
+import { STUDENT_VALIDATION } from '@/constants/validation';
+
+const StudentSchema = z.object({
+  name: z.string()
+    .min(STUDENT_VALIDATION.NAME_MIN_LENGTH)
+    .max(STUDENT_VALIDATION.NAME_MAX_LENGTH),
+  email: z.string()
+    .email()
+    .max(STUDENT_VALIDATION.EMAIL_MAX_LENGTH),
+});
+```
+
+#### 例3: タイムアウト
+
+```typescript
+// ❌ 悪い例
+const response = await fetch('/api/contracts', {
+  signal: AbortSignal.timeout(5000),
+});
+
+// ✅ 良い例
+import { API_TIMEOUT_MS } from '@/constants/api';
+
+const response = await fetch('/api/contracts', {
+  signal: AbortSignal.timeout(API_TIMEOUT_MS),
+});
+```
+
+#### 例4: HTTPステータスコード
+
+```typescript
+// ❌ 悪い例
+if (response.status === 200) {
+  return await response.json();
+}
+if (response.status === 404) {
+  throw new Error('Not Found');
+}
+
+// ✅ 良い例
+import { HTTP_STATUS } from '@/constants/api';
+
+if (response.status === HTTP_STATUS.OK) {
+  return await response.json();
+}
+if (response.status === HTTP_STATUS.NOT_FOUND) {
+  throw new Error('Not Found');
+}
+```
+
+#### 例5: 時間計算
+
+```typescript
+// ❌ 悪い例
+const oneDayAgo = Date.now() - 86400000;
+const oneWeekAgo = Date.now() - 604800000;
+
+// ✅ 良い例
+import { TIME } from '@/constants/time';
+
+const oneDayAgo = Date.now() - TIME.ONE_DAY_MS;
+const oneWeekAgo = Date.now() - TIME.ONE_WEEK_MS;
+```
+
+### マジックナンバー禁止の利点
+
+1. **可読性の向上**: 数値の意味が名前から理解できる
+2. **保守性の向上**: 値の変更が1箇所で済む
+3. **バグの削減**: 同じ意味の値が異なる数値になる不整合を防止
+4. **変更の影響範囲が追跡しやすい**: 定数の参照箇所を検索できる
+5. **開発効率の向上**: IDEの補完が効く
+
+## 5. 型安全性
+
+```typescript
+// ❌ any 型の多用は禁止
+const data: any = fetchData();
+
+// ❌ 不適切な型アサーション
+const student = data as Student;
+
+// ✅ 適切な型定義
+interface Student {
+  id: string;
+  name: string;
+}
+const student: Student = fetchData();
+```
+
+## 6. 型定義のベストプラクティス
+
+### Interface vs Type Alias
+
+**基本的にはInterfaceを使用し、Union/Intersection型が必要な場合はType Aliasを使用**
+
+```typescript
+// ✅ Interface: オブジェクトの形状を定義する場合
+interface Student {
+  id: string;
+  name: string;
+  email: string;
+  enrollmentDate: Date;
+}
+
+// ✅ Type Alias: Union型が必要な場合
+type ContractStatus = 'draft' | 'confirmed' | 'active' | 'completed' | 'cancelled';
+
+// ✅ Type Alias: Intersection型が必要な場合
+type TimestampedContract = Contract & {
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+// ✅ Interface: 拡張可能性が必要な場合
+interface BaseEntity {
+  id: string;
+  createdAt: Date;
+}
+
+interface Student extends BaseEntity {
+  name: string;
+  email: string;
+}
+
+interface Teacher extends BaseEntity {
+  name: string;
+  subject: string;
+}
+```
+
+### Readonly修飾子の使用
+
+**`readonly`修飾子は使用しない**
+
+このプロジェクトでは、型定義における`readonly`修飾子の使用を禁止します。
+
+**理由**:
+- Reactでは「propsは読み取り専用」が大前提であり、TypeScriptの`readonly`は冗長
+- React公式や主要ライブラリ（TanStack Query、React Hook Form等）でも`readonly`を使用していない
+- コードがシンプルになり、可読性が向上する
+- 実際のバグ防止効果は限定的（スプレッド構文を使う習慣の方が重要）
+
+```typescript
+// ❌ 悪い例: readonlyを使用
+interface Contract {
+  id: string;
+  studentId: string;
+  courseType: 'individual' | 'group';
+}
+
+// ✅ 良い例: readonlyを使用しない
+interface Contract {
+  id: string;
+  studentId: string;
+  courseType: 'individual' | 'group';
+}
+
+// ✅ 配列もreadonlyを使用しない
+interface ContractWithPayments {
+  id: string;
+  payments: Payment[];
+  metadata: {
+    createdBy: string;
+    updatedBy: string;
+  };
+}
+```
+
+**注意**: 不変性はコードレビューやESLintルールで担保します。スプレッド構文（`{ ...contract, id: 'new' }`）を使用する習慣を徹底してください。
+
+### ジェネリクスの使用
+
+**再利用可能な型定義**
+
+```typescript
+// ✅ ジェネリック関数
+/**
+ * 配列から指定されたIDの要素を検索する
+ *
+ * @param items - 検索対象の配列
+ * @param id - 検索するID
+ * @returns 見つかった要素、または undefined
+ */
+function findById<T extends { id: string }>(
+  items: T[],
+  id: string
+): T | undefined {
+  return items.find((item) => item.id === id);
+}
+
+// 使用例
+const student = findById(students, 'student-123');
+const contract = findById(contracts, 'contract-456');
+
+// ✅ ジェネリックインターフェース
+interface ApiResponse<T> {
+  data: T;
+  status: number;
+  message: string;
+}
+
+// 使用例
+type StudentResponse = ApiResponse<Student>;
+type ContractsResponse = ApiResponse<Contract[]>;
+
+// ✅ ジェネリック制約
+interface Identifiable {
+  id: string;
+}
+
+/**
+ * エンティティのリストを管理するクラス
+ */
+class EntityManager<T extends Identifiable> {
+  private entities: Map<string, T> = new Map();
+
+  /**
+   * エンティティを追加する
+   *
+   * @param entity - 追加するエンティティ
+   */
+  add(entity: T): void {
+    this.entities.set(entity.id, entity);
+  }
+
+  /**
+   * エンティティを取得する
+   *
+   * @param id - 取得するエンティティのID
+   * @returns 見つかったエンティティ、または undefined
+   */
+  get(id: string): T | undefined {
+    return this.entities.get(id);
+  }
+}
+
+const studentManager = new EntityManager<Student>();
+const contractManager = new EntityManager<Contract>();
+```
+
+### ユーティリティ型の活用
+
+**TypeScript組み込みのユーティリティ型を活用**
+
+```typescript
+// ✅ Partial: 全てのプロパティをオプショナルに
+interface Student {
+  id: string;
+  name: string;
+  email: string;
+  phoneNumber: string;
+}
+
+type StudentUpdateInput = Partial<Omit<Student, 'id'>>;
+// { name?: string; email?: string; phoneNumber?: string; }
+
+// ✅ Pick: 特定のプロパティのみを抽出
+type StudentSummary = Pick<Student, 'id' | 'name'>;
+// { id: string; name: string; }
+
+// ✅ Omit: 特定のプロパティを除外
+type StudentWithoutId = Omit<Student, 'id'>;
+// { name: string; email: string; phoneNumber: string; }
+
+// ✅ Required: 全てのプロパティを必須に
+interface ContractDraft {
+  studentId?: string;
+  courseType?: string;
+  startDate?: Date;
+}
+
+type Contract = Required<ContractDraft> & {
+  id: string;
+  status: ContractStatus;
+};
+
+// ✅ Record: キーと値の型を指定
+type ContractStatusLabels = Record<ContractStatus, string>;
+
+const statusLabels: ContractStatusLabels = {
+  draft: '下書き',
+  confirmed: '確定',
+  active: '進行中',
+  completed: '完了',
+  cancelled: 'キャンセル',
+};
+
+// ✅ Extract: Union型から特定の型を抽出
+type ActiveStatus = Extract<ContractStatus, 'active' | 'confirmed'>;
+// 'active' | 'confirmed'
+
+// ✅ Exclude: Union型から特定の型を除外
+type InactiveStatus = Exclude<ContractStatus, 'active' | 'confirmed'>;
+// 'draft' | 'completed' | 'cancelled'
+
+// ✅ ReturnType: 関数の戻り値の型を取得
+function fetchContract(id: string) {
+  return {
+    id,
+    studentId: 'student-123',
+    status: 'active' as const,
+  };
+}
+
+type ContractData = ReturnType<typeof fetchContract>;
+// { id: string; studentId: string; status: 'active'; }
+```
+
+### 型ガードの実装
+
+**実行時の型チェック**
+
+```typescript
+// ✅ ユーザー定義型ガード
+function isStudent(entity: Student | Teacher): entity is Student {
+  return 'enrollmentDate' in entity;
+}
+
+function processEntity(entity: Student | Teacher) {
+  if (isStudent(entity)) {
+    // この中では entity は Student 型
+    console.log(entity.enrollmentDate);
+  } else {
+    // この中では entity は Teacher 型
+    console.log(entity.subject);
+  }
+}
+
+// ✅ null/undefinedチェックの型ガード
+function isNotNull<T>(value: T | null | undefined): value is T {
+  return value !== null && value !== undefined;
+}
+
+// 使用例
+const students: (Student | null)[] = [student1, null, student2];
+const validStudents = students.filter(isNotNull);
+// validStudents は Student[] 型
+
+// ✅ 配列の型ガード
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
+// ✅ オブジェクトの型ガード
+interface ApiError {
+  error: string;
+  code: number;
+}
+
+function isApiError(value: unknown): value is ApiError {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'error' in value &&
+    'code' in value &&
+    typeof (value as ApiError).error === 'string' &&
+    typeof (value as ApiError).code === 'number'
+  );
+}
+
+// 使用例
+async function fetchData(): Promise<Student | ApiError> {
+  const response = await fetch('/api/student');
+  const data = await response.json();
+
+  if (isApiError(data)) {
+    throw new Error(data.error);
+  }
+
+  return data;
+}
+```
+
+### 型の推論を活用
+
+**明示的な型注釈は必要な場合のみ**
+
+```typescript
+// ✅ 良い例: 型推論を活用
+const students = [
+  { id: '1', name: 'Alice' },
+  { id: '2', name: 'Bob' },
+]; // { id: string; name: string; }[] と推論される
+
+// ✅ 型注釈が必要な場合: より厳密な型が必要
+const statuses: ContractStatus[] = ['draft', 'active']; // Union型を保持
+
+// ✅ const assertion: リテラル型を保持
+const config = {
+  apiUrl: 'https://api.example.com',
+  timeout: 5000,
+} as const;
+// { apiUrl: 'https://api.example.com'; timeout: 5000; }
+
+// ❌ 不要な型注釈
+const count: number = 0; // 型推論で十分
+const message: string = 'Hello'; // 型推論で十分
+
+// ✅ 型推論で十分
+const count = 0; // number型と推論される
+const message = 'Hello'; // string型と推論される
+```
+
+## 7. 非同期処理
+
+### Promise / async-await
+
+**非同期処理の適切な型定義**
+
+```typescript
+// ✅ Promise<T>を明示的に指定
+/**
+ * 契約データを取得する
+ *
+ * @param contractId - 取得対象の契約ID
+ * @returns 契約データを含むPromise
+ * @throws {ApiError} API呼び出しが失敗した場合
+ */
+async function fetchContract(contractId: string): Promise<Contract> {
+  const response = await fetch(`/api/contracts/${contractId}`);
+
+  if (!response.ok) {
+    throw new ApiError(`Failed to fetch contract: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data;
+}
+
+// ✅ 複数の非同期処理を並列実行
+/**
+ * 契約と生徒のデータを同時に取得する
+ *
+ * @param contractId - 取得対象の契約ID
+ * @returns 契約と生徒のデータを含むPromise
+ */
+async function fetchContractWithStudent(contractId: string): Promise<{
+  contract: Contract;
+  student: Student;
+}> {
+  const [contract, student] = await Promise.all([
+    fetchContract(contractId),
+    fetchStudent(contract.studentId),
+  ]);
+
+  return { contract, student };
+}
+
+// ✅ エラーハンドリング
+/**
+ * 契約データを安全に取得する
+ *
+ * @param contractId - 取得対象の契約ID
+ * @returns 契約データまたはnullを含むPromise
+ */
+async function fetchContractSafely(contractId: string): Promise<Contract | null> {
+  try {
+    const contract = await fetchContract(contractId);
+    return contract;
+  } catch (error) {
+    console.error('契約の取得に失敗しました:', error);
+    return null;
+  }
+}
+```
+
+### カスタムエラークラス
+
+**型安全なエラーハンドリング**
+
+```typescript
+/**
+ * API呼び出しエラー
+ */
+class ApiError extends Error {
+  constructor(
+    message: string,
+    public statusCode: number,
+    public response?: unknown
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+/**
+ * バリデーションエラー
+ */
+class ValidationError extends Error {
+  constructor(
+    message: string,
+    public errors: Record<string, string[]>
+  ) {
+    super(message);
+    this.name = 'ValidationError';
+  }
+}
+
+/**
+ * 契約を作成する
+ *
+ * @param data - 契約データ
+ * @returns 作成された契約
+ * @throws {ValidationError} バリデーションエラーの場合
+ * @throws {ApiError} API呼び出しが失敗した場合
+ */
+async function createContract(data: ContractInput): Promise<Contract> {
+  const response = await fetch('/api/contracts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+
+    if (response.status === 400) {
+      throw new ValidationError('入力エラーがあります', errorData.errors);
+    }
+
+    throw new ApiError('契約の作成に失敗しました', response.status, errorData);
+  }
+
+  return await response.json();
+}
+
+// 使用例
+async function handleCreateContract(data: ContractInput) {
+  try {
+    const contract = await createContract(data);
+    console.log('契約を作成しました:', contract);
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      console.error('バリデーションエラー:', error.errors);
+    } else if (error instanceof ApiError) {
+      console.error('APIエラー:', error.statusCode, error.message);
+    } else {
+      console.error('予期しないエラー:', error);
+    }
+  }
+}
+```
+
+## 8. Discriminated Union（識別可能なユニオン型）
+
+**型安全な条件分岐**
+
+```typescript
+// ✅ Discriminated Union
+type ContractEvent =
+  | { type: 'created'; contract: Contract }
+  | { type: 'updated'; contractId: string; changes: Partial<Contract> }
+  | { type: 'cancelled'; contractId: string; reason: string };
+
+/**
+ * 契約イベントを処理する
+ *
+ * @param event - 処理対象のイベント
+ */
+function handleContractEvent(event: ContractEvent): void {
+  switch (event.type) {
+    case 'created':
+      // event.contract が利用可能
+      console.log('契約を作成しました:', event.contract);
+      break;
+    case 'updated':
+      // event.contractId と event.changes が利用可能
+      console.log('契約を更新しました:', event.contractId, event.changes);
+      break;
+    case 'cancelled':
+      // event.contractId と event.reason が利用可能
+      console.log('契約をキャンセルしました:', event.contractId, event.reason);
+      break;
+  }
+}
+
+// ✅ API レスポンスのDiscriminated Union
+type ApiResult<T> =
+  | { success: true; data: T }
+  | { success: false; error: string; code: number };
+
+/**
+ * 契約を取得する
+ *
+ * @param contractId - 取得対象の契約ID
+ * @returns API結果
+ */
+async function getContract(contractId: string): Promise<ApiResult<Contract>> {
+  try {
+    const contract = await fetchContract(contractId);
+    return { success: true, data: contract };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : '不明なエラー',
+      code: error instanceof ApiError ? error.statusCode : 500,
+    };
+  }
+}
+
+// 使用例
+const result = await getContract('contract-123');
+
+if (result.success) {
+  // result.data が利用可能
+  console.log('契約:', result.data);
+} else {
+  // result.error と result.code が利用可能
+  console.error('エラー:', result.error, result.code);
+}
+```

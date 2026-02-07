@@ -1,0 +1,414 @@
+---
+description: Git運用とブランチ管理ルール
+globs:
+alwaysApply: true
+---
+
+# Git運用ルール
+
+## ブランチ構成
+
+```
+main (本番ブランチ)
+└── develop (デフォルトブランチ - 開発統合ブランチ)
+    └── feature/機能名 (機能開発ブランチ)
+```
+
+## デフォルトブランチ: `develop`
+
+- 新規featureブランチは`develop`から作成
+- Pull Requestは`develop`へマージ
+- `main`へは本番リリース時のみマージ
+
+## ブランチ命名規則
+
+| 種類 | 形式 | 例 |
+|------|------|-----|
+| 機能開発 | `feature/機能名` | `feature/contract-search` |
+| バグ修正 | `bugfix/バグ名` | `bugfix/payment-calculation` |
+| ホットフィックス | `hotfix/修正名` | `hotfix/login-error` |
+| Issue対応 | `issue-<番号>-<接尾詞>` | `issue-125-cursor-rules` |
+
+## Git worktree運用規約
+
+### worktree命名規則
+
+**形式**: `../manabi-issue-<番号>` または `../manabi-<ブランチ識別子>`
+
+- Issue対応の場合：`../manabi-issue-<番号>`
+- その他：`../manabi-<ブランチ識別子>`
+
+**例**:
+```bash
+# Issue #125 の作業
+git worktree add -b issue-125-cursor-rules ../manabi-issue-125 develop
+
+# feature/contract-search ブランチ
+git worktree add -b feature/contract-search ../manabi-contract-search develop
+
+# bugfix対応
+git worktree add -b bugfix/payment-calc ../manabi-payment-calc develop
+```
+
+### worktree管理のベストプラクティス
+
+#### worktree作成（新規ブランチ）
+
+```bash
+# developから新規ブランチを作成してworktreeを追加
+git checkout develop
+git pull origin develop
+
+# -b <ブランチ名> <worktreeディレクトリ> <ベースブランチ>
+git worktree add -b issue-123-feature-name ../manabi-issue-123 develop
+```
+
+#### worktree作成（既存ブランチ）
+
+```bash
+# 既存のブランチに対してworktreeを追加
+git worktree add ../manabi-issue-123 issue-123-feature-name
+```
+
+#### worktree一覧確認
+
+```bash
+# 現在のworktree一覧を表示
+git worktree list
+```
+
+#### worktree削除
+
+```bash
+# worktreeディレクトリを削除
+git worktree remove ../manabi-issue-123
+
+# ブランチも削除する場合（マージ後）
+git branch -d issue-123-feature-name
+```
+
+#### worktree間の移動
+
+```bash
+# 別のworktreeに移動
+cd ../manabi-issue-125
+
+# 元のディレクトリに戻る
+cd ../manabi
+```
+
+### worktree使用時の注意事項
+
+1. **同じブランチを複数worktreeでチェックアウトできない**
+   - 異なるブランチで作業する必要がある
+
+2. **不要なworktreeは定期的に削除**
+   ```bash
+   # 削除されたworktreeをクリーンアップ
+   git worktree prune
+   ```
+
+3. **worktreeディレクトリを手動で削除した場合**
+   ```bash
+   # Git管理情報をクリーンアップ
+   git worktree prune
+   ```
+
+4. **作業完了後の推奨フロー**
+   - PRマージ後、worktreeを削除
+   - ブランチも削除（リモートも含む）
+   ```bash
+   cd ../manabi
+   git worktree remove ../manabi-issue-123
+   git branch -d issue-123-feature-name
+   git push origin --delete issue-123-feature-name
+   ```
+
+## ブランチ作成の実施手順
+
+**必ずdevelopブランチから作成する**
+
+```bash
+# developブランチから最新を取得
+git checkout develop
+git pull origin develop
+
+# 新しいブランチを作成
+git checkout -b feature/機能名
+```
+
+## Issue管理ルール
+
+### Issueクローズのタイミング
+- PRマージ時に自動的にクローズ
+- **重要**: Issue実装完了時に個別にクローズしない（PRマージ時まで待つ）
+
+### PRでのIssue参照
+PR本文に `Closes #123` を記載
+
+```markdown
+# PR本文の例
+
+## 概要
+契約検索機能を実装しました。
+
+## 関連issue
+Closes #7
+
+## 変更内容
+- 契約番号・生徒名での検索機能
+- ステータスフィルタリング
+- ページネーション
+```
+
+## GitHub CLI (gh) の使用
+
+**Issue確認・取得**: `gh issue view <番号>` を使用
+
+```bash
+# Issue #123 の内容を確認
+gh issue view 123 --repo kizuki-dsd/manabi
+```
+
+**PR作成**: `gh pr create` を使用
+
+```bash
+# PRを作成（developへマージ）
+gh pr create --base develop --title "タイトル" --body "Closes #123"
+```
+
+**ブランチとIssueの紐付け**: ブランチ名にissue番号を含める
+
+```bash
+# 推奨: issue番号を含めたブランチ名
+git checkout -b issue-123-feature-name
+```
+
+**作業フロー例**:
+
+```bash
+# 1. Issue内容を確認
+gh issue view 123
+
+# 2. developから作業ブランチを作成
+git checkout develop
+git pull origin develop
+git checkout -b issue-123-feature-name
+
+# 3. 作業を実施してコミット
+git add .
+git commit -m "feat: 機能を追加"
+
+# 4. プッシュ
+git push -u origin issue-123-feature-name
+
+# 5. PRを作成
+gh pr create --base develop --title "機能名を追加" --body "Closes #123"
+```
+
+## コミットメッセージ
+
+```
+# 形式
+<type>: <subject>
+
+# 例
+feat: 契約検索機能を追加
+fix: 支払い計算の不具合を修正
+docs: API仕様書を更新
+refactor: ContractServiceのリファクタリング
+test: 契約検索のテストを追加
+```
+
+### Type一覧
+- `feat`: 新機能
+- `fix`: バグ修正
+- `docs`: ドキュメントのみの変更
+- `style`: コードの意味に影響しない変更（空白、フォーマット等）
+- `refactor`: バグ修正や機能追加を伴わないコード変更
+- `test`: テストの追加・修正
+- `chore`: ビルドプロセスや補助ツールの変更
+
+### コミットメッセージの自動検証
+
+**commitlint**が自動的にコミットメッセージをチェックします。規約に違反するコミットメッセージはコミットが拒否されます。
+
+#### 有効なコミットメッセージ例
+
+✅ `feat: 契約検索機能を追加`  
+✅ `fix: 支払い計算の不具合を修正`  
+✅ `docs: API仕様書を更新`  
+✅ `refactor: ContractServiceのリファクタリング`  
+✅ `test: 契約検索のテストを追加`  
+✅ `chore: 依存関係を更新`
+
+#### 無効なコミットメッセージ例
+
+❌ `add feature` - typeがない  
+❌ `機能追加` - 英語のtypeが必要  
+❌ `feat:契約検索` - コロンの後にスペースが必要  
+❌ `FEAT: 機能追加` - typeは小文字である必要がある  
+❌ `feat:` - subjectが空
+
+#### 動作確認
+
+```bash
+# 正しいコミットメッセージ（成功するはず）
+git commit -m "feat: テスト機能を追加"
+
+# 間違ったコミットメッセージ（失敗するはず）
+git commit -m "add feature"
+# エラー: type may not be empty [type-empty]
+```
+
+#### 注意事項
+
+- 既存のコミットには影響しません（新規コミットのみ検証）
+- huskyのcommit-msgフックが自動的に実行されます
+- 規約違反の場合はコミットが拒否され、メッセージを修正する必要があります
+
+## force-push の禁止
+
+**基本方針: force-push は原則禁止**
+
+```bash
+# ❌ 禁止: force-push
+git push --force
+git push -f
+
+# ❌ 絶対禁止: main/master/develop へのforce-push
+git push --force origin main
+git push -f origin master
+git push --force origin develop
+
+# ✅ 推奨: revert コミットで修正
+git revert <commit-hash>
+git push origin <branch>
+
+# ✅ 推奨: 新しいコミットで修正
+git commit -m "fix: 〇〇の修正"
+git push origin <branch>
+```
+
+### force-push が必要な場合の手順
+
+**やむを得ずforce-pushが必要な場合（feature/個人ブランチのみ）**:
+
+1. **事前確認**
+   - 他のメンバーが同じブランチで作業していないか確認
+   - チームに事前通知
+
+2. **実行**
+   ```bash
+   # 現在のブランチを確認
+   git branch --show-current
+   
+   # main/master/develop でないことを確認
+   # feature/個人ブランチのみforce-push可能
+   git push --force-with-lease origin <branch>
+   ```
+
+3. **--force-with-lease の使用**
+   - `--force` の代わりに `--force-with-lease` を使用
+   - リモートに新しいコミットがある場合は失敗する（安全）
+   - リモートブランチの最新状態を確認してからforce-pushするため、他の開発者のコミットを誤って上書きするリスクが低減されます
+   
+   ```bash
+   # リモートの最新状態を確認
+   git fetch origin
+   
+   # 安全にforce-push（リモートに新しいコミットがあればエラー）
+   git push --force-with-lease origin feature/my-branch
+   ```
+
+### 禁止事項
+
+**絶対禁止（main/master/develop）**:
+- `git push --force origin main` 
+- `git push --force origin master`
+- `git push -f origin develop`
+
+**その他の禁止事項**:
+- `--no-verify` との併用
+- 事前通知なしのforce-push（feature/個人ブランチでも必ず通知）
+
+### 代替手段
+
+**誤ったコミットを修正したい場合**:
+
+```bash
+# ケース1: 直前のコミットメッセージを修正したい
+git commit --amend -m "新しいメッセージ"
+# ⚠️ まだpushしていない場合のみ
+
+# ケース2: すでにpushしたコミットを修正したい
+git revert <commit-hash>
+git push origin <branch>
+
+# ケース3: 複数のコミットをまとめたい（pushする前）
+git rebase -i HEAD~3
+# ⚠️ まだpushしていない場合のみ
+# ⚠️ rebase後に初めてpushする場合は通常のpushでOK
+# ⚠️ すでにpushしたコミットをrebaseした場合は、
+#    --force-with-leaseが必要（この場合は事前にチーム通知）
+```
+
+### force-push のリスク
+
+force-pushを使用すると以下のリスクがあります：
+
+- **コミット履歴の破壊**: 既存のコミット履歴が上書きされる
+- **他の開発者への影響**: 同じブランチで作業している他のメンバーの作業に影響
+- **意図しないコードの削除**: 他のメンバーの変更が消える可能性
+- **リリース済みコードの改変**: 本番環境に反映済みのコードが改変される
+
+特に `main/master/develop` ブランチへのforce-pushは、本番環境や他の開発者の作業に重大な影響を与える可能性があるため、絶対に禁止します。
+
+## Claude AI による自動チェック（実装予定の仕様）
+
+Claude AIがGit操作のコマンド実行時に以下を自動チェックします：
+
+1. **force-push の検出**
+   - `git push --force` または `git push -f` を検出
+   - 警告メッセージを表示
+   - 対象ブランチがmain/master/developの場合は実行を拒否
+
+2. **警告メッセージ**
+   ```
+   ⚠️ 警告: force-pushを実行しようとしています
+   
+   対象ブランチ: <branch-name>
+   
+   force-pushは以下のリスクがあります：
+   - コミット履歴の破壊
+   - 他の開発者への影響
+   - コードの意図しない削除
+   
+   代替手段:
+   - git revert <commit-hash>
+   - 新しいコミットで修正
+   - git push --force-with-lease（より安全）
+   
+   本当に実行しますか？ (main/master/developの場合は実行不可)
+   ```
+
+3. **main/master/develop への force-push 拒否**
+   ```
+   ❌ エラー: main/master/develop ブランチへのforce-pushは禁止されています
+   
+   代わりに以下の方法を使用してください：
+   - git revert でコミットを取り消す
+   - hotfixブランチを作成して修正をマージ
+   - 新しいコミットで修正を追加
+   ```
+
+## 参考資料
+
+- [Git公式ドキュメント - git-push](https://git-scm.com/docs/git-push)
+- [Why you should use --force-with-lease](https://blog.developer.atlassian.com/force-with-lease/)
+- [Git - Working with Remotes](https://git-scm.com/book/en/v2/Git-Basics-Working-with-Remotes)
+
+## 関連ドキュメント
+
+- [コードレビュー基準とPRフロー](review.mdc) - PRレビューの詳細な手順とClaude AI連携
+- [コーディング規約](../CLAUDE.md) - プロジェクト全体のコーディング規約

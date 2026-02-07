@@ -1,0 +1,694 @@
+---
+description: コンプライアンス規約（医療・金融・行政対応）
+globs:
+alwaysApply: true
+---
+
+# コンプライアンス規約
+
+**対象業界**: 医療、金融、行政
+
+このドキュメントは、各業界の法令・規制に準拠するための実装ガイドラインを提供します。
+
+---
+
+## 共通コンプライアンス要件
+
+### 個人情報保護法対応
+
+**日本の個人情報保護法に準拠**
+
+#### 個人情報の定義
+
+以下は個人情報として厳格に管理する必要があります：
+
+- 氏名
+- 生年月日
+- 住所
+- 電話番号
+- メールアドレス
+- マイナンバー
+- 顔写真
+- 指紋、虹彩などの生体情報
+
+#### 個人情報の取得
+
+```typescript
+/**
+ * 個人情報の取得時に利用目的を明示
+ */
+interface PersonalDataConsent {
+  userId: string;
+  purpose: string; // 利用目的
+  consentedAt: Date; // 同意日時
+  ipAddress: string; // 同意時のIPアドレス
+  userAgent: string; // 同意時のUser-Agent
+}
+
+/**
+ * 個人情報取得時の同意記録
+ *
+ * @param userId - ユーザーID
+ * @param purpose - 利用目的
+ */
+async function recordConsent(userId: string, purpose: string): Promise<void> {
+  await db.personalDataConsent.create({
+    data: {
+      userId,
+      purpose,
+      consentedAt: new Date(),
+      ipAddress: getClientIP(),
+      userAgent: getUserAgent(),
+    },
+  });
+}
+
+export { recordConsent };
+```
+
+#### 個人情報の第三者提供
+
+```typescript
+/**
+ * 個人情報の第三者提供記録
+ */
+interface ThirdPartyDisclosure {
+  userId: string;
+  recipientName: string; // 提供先名称
+  purpose: string; // 提供目的
+  dataItems: string[]; // 提供項目
+  disclosedAt: Date; // 提供日時
+  userConsent: boolean; // 本人同意の有無
+}
+
+/**
+ * 第三者提供を記録
+ *
+ * @param userId - ユーザーID
+ * @param recipientName - 提供先
+ * @param purpose - 提供目的
+ * @param dataItems - 提供する情報項目
+ * @param userConsent - 本人同意の有無
+ */
+async function recordThirdPartyDisclosure(
+  userId: string,
+  recipientName: string,
+  purpose: string,
+  dataItems: string[],
+  userConsent: boolean
+): Promise<void> {
+  await db.thirdPartyDisclosure.create({
+    data: {
+      userId,
+      recipientName,
+      purpose,
+      dataItems: JSON.stringify(dataItems),
+      disclosedAt: new Date(),
+      userConsent,
+    },
+  });
+
+  // 監査ログに記録
+  await logAudit('THIRD_PARTY_DISCLOSURE', userId, 'personal_data', 'disclose', {
+    recipientName,
+    purpose,
+    dataItems,
+    userConsent,
+  });
+}
+
+export { recordThirdPartyDisclosure };
+```
+
+#### 本人からの開示請求対応
+
+```typescript
+/**
+ * 保有個人データの開示請求に対応
+ *
+ * @param userId - ユーザーID
+ * @returns 個人データのエクスポート
+ */
+async function exportPersonalData(userId: string): Promise<PersonalDataExport> {
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    include: {
+      contracts: true,
+      payments: true,
+      loginHistory: {
+        orderBy: { loginAt: 'desc' },
+        take: 100,
+      },
+    },
+  });
+
+  // 早期リターン: ユーザーが存在しない
+  if (!user) {
+    throw new NotFoundError('USER_NOT_FOUND', 'ユーザーが見つかりません');
+  }
+
+  // 機密情報を除外してエクスポート
+  const exportData = {
+    personalInfo: {
+      name: user.name,
+      email: user.email,
+      phoneNumber: user.phoneNumber,
+      address: user.address,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    },
+    contracts: user.contracts.map((contract) => ({
+      contractNumber: contract.contractNumber,
+      status: contract.status,
+      startDate: contract.startDate,
+      endDate: contract.endDate,
+    })),
+    payments: user.payments.map((payment) => ({
+      amount: payment.amount,
+      paidAt: payment.paidAt,
+      status: payment.status,
+    })),
+    loginHistory: user.loginHistory.map((login) => ({
+      loginAt: login.loginAt,
+      ipAddress: login.ipAddress,
+    })),
+  };
+
+  // 開示請求を記録
+  await logAudit('PERSONAL_DATA_EXPORT', userId, 'personal_data', 'export', {
+    requestedAt: new Date(),
+  });
+
+  return exportData;
+}
+
+export { exportPersonalData };
+```
+
+#### 削除請求（忘れられる権利）
+
+```typescript
+/**
+ * 個人情報の削除（論理削除）
+ *
+ * @param userId - ユーザーID
+ */
+async function deletePersonalData(userId: string): Promise<void> {
+  // ソフトデリート（30日間の猶予期間）
+  await db.user.update({
+    where: { id: userId },
+    data: {
+      deletedAt: new Date(),
+      // 個人情報を仮名化
+      name: '削除済みユーザー',
+      email: `deleted_${userId}@example.com`,
+      phoneNumber: null,
+      address: null,
+    },
+  });
+
+  // 削除請求を記録
+  await logAudit('PERSONAL_DATA_DELETION', userId, 'personal_data', 'delete', {
+    deletedAt: new Date(),
+    retentionPeriodDays: 30,
+  });
+}
+
+/**
+ * 個人情報の完全削除（30日後）
+ *
+ * @param userId - ユーザーID
+ */
+async function permanentlyDeletePersonalData(userId: string): Promise<void> {
+  // 関連データを全て削除
+  await db.$transaction([
+    db.contract.deleteMany({ where: { userId } }),
+    db.payment.deleteMany({ where: { userId } }),
+    db.loginHistory.deleteMany({ where: { userId } }),
+    db.session.deleteMany({ where: { userId } }),
+    db.user.delete({ where: { id: userId } }),
+  ]);
+
+  // 完全削除を記録（監査ログは保持）
+  await logAudit('PERSONAL_DATA_PERMANENT_DELETION', userId, 'personal_data', 'permanent_delete', {
+    deletedAt: new Date(),
+  });
+}
+
+export { deletePersonalData, permanentlyDeletePersonalData };
+```
+
+---
+
+## 医療業界向けコンプライアンス
+
+### 医療法・個人情報保護法対応
+
+#### 医療情報の厳格な管理
+
+```typescript
+/**
+ * 医療情報（要配慮個人情報）
+ */
+interface MedicalRecord {
+  patientId: string;
+  diagnosisDate: Date;
+  diagnosis: string; // 暗号化必須
+  treatment: string; // 暗号化必須
+  medication: string; // 暗号化必須
+  doctor: string;
+  hospital: string;
+  encryptedData: string; // 暗号化されたデータ
+}
+
+/**
+ * 医療情報を暗号化して保存
+ *
+ * @param patientId - 患者ID
+ * @param medicalData - 医療情報
+ */
+async function saveMedicalRecord(
+  patientId: string,
+  medicalData: {
+    diagnosis: string;
+    treatment: string;
+    medication: string;
+    doctor: string;
+    hospital: string;
+  }
+): Promise<void> {
+  // 医療情報を暗号化
+  const encryptedData = encrypt(JSON.stringify(medicalData));
+
+  await db.medicalRecord.create({
+    data: {
+      patientId,
+      diagnosisDate: new Date(),
+      encryptedData,
+      doctor: medicalData.doctor,
+      hospital: medicalData.hospital,
+    },
+  });
+
+  // アクセスログを記録（監査証跡）
+  await logAudit('MEDICAL_RECORD_CREATED', patientId, 'medical_record', 'create', {
+    doctor: medicalData.doctor,
+    hospital: medicalData.hospital,
+  });
+}
+
+/**
+ * 医療情報を復号化して取得
+ *
+ * @param recordId - 医療記録ID
+ * @param requesterId - アクセス者のID
+ * @returns 医療情報
+ */
+async function getMedicalRecord(recordId: string, requesterId: string): Promise<MedicalRecord> {
+  const record = await db.medicalRecord.findUnique({
+    where: { id: recordId },
+  });
+
+  // 早期リターン: 記録が存在しない
+  if (!record) {
+    throw new NotFoundError('MEDICAL_RECORD_NOT_FOUND', '医療記録が見つかりません');
+  }
+
+  // アクセス権限チェック
+  const hasAccess = await checkMedicalRecordAccess(requesterId, record.patientId);
+  if (!hasAccess) {
+    await logAudit('MEDICAL_RECORD_ACCESS_DENIED', requesterId, 'medical_record', 'access_denied', {
+      recordId,
+      patientId: record.patientId,
+    });
+    throw new ForbiddenError('この医療記録にアクセスする権限がありません');
+  }
+
+  // 復号化
+  const decryptedData = JSON.parse(decrypt(record.encryptedData));
+
+  // アクセスログを記録
+  await logAudit('MEDICAL_RECORD_ACCESSED', requesterId, 'medical_record', 'access', {
+    recordId,
+    patientId: record.patientId,
+  });
+
+  return {
+    patientId: record.patientId,
+    diagnosisDate: record.diagnosisDate,
+    ...decryptedData,
+  };
+}
+
+export { saveMedicalRecord, getMedicalRecord };
+```
+
+#### 医療従事者による閲覧制限
+
+```typescript
+/**
+ * 医療従事者の権限チェック
+ *
+ * @param userId - 医療従事者ID
+ * @param patientId - 患者ID
+ * @returns アクセス権限の有無
+ */
+async function checkMedicalRecordAccess(userId: string, patientId: string): Promise<boolean> {
+  const user = await db.user.findUnique({ where: { id: userId } });
+
+  // 医療従事者ではない場合は拒否
+  if (!user || !['doctor', 'nurse', 'admin'].includes(user.role)) {
+    return false;
+  }
+
+  // 担当患者かどうかをチェック
+  const assignment = await db.patientAssignment.findFirst({
+    where: {
+      medicalStaffId: userId,
+      patientId,
+      // 有効期間内
+      startDate: { lte: new Date() },
+      OR: [{ endDate: null }, { endDate: { gte: new Date() } }],
+    },
+  });
+
+  return assignment !== null;
+}
+
+export { checkMedicalRecordAccess };
+```
+
+---
+
+## 金融業界向けコンプライアンス
+
+### PCI DSS（Payment Card Industry Data Security Standard）対応
+
+#### クレジットカード情報の非保持化
+
+**重要: クレジットカード情報は自社システムで保持しない**
+
+```typescript
+/**
+ * 決済代行サービスを使用した安全な決済処理
+ */
+import Stripe from 'stripe';
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
+  apiVersion: '2023-10-16',
+});
+
+/**
+ * 決済処理（カード情報は保持しない）
+ *
+ * @param customerId - 顧客ID
+ * @param amount - 金額（円）
+ * @param paymentMethodId - Stripeの決済方法ID
+ */
+async function processPayment(
+  customerId: string,
+  amount: number,
+  paymentMethodId: string
+): Promise<{ transactionId: string; status: string }> {
+  // Stripe経由で決済処理（カード情報は保持しない）
+  const paymentIntent = await stripe.paymentIntents.create({
+    amount,
+    currency: 'jpy',
+    customer: customerId,
+    payment_method: paymentMethodId,
+    confirm: true,
+  });
+
+  // 決済記録を保存（カード情報は含まない）
+  await db.payment.create({
+    data: {
+      customerId,
+      amount,
+      status: paymentIntent.status,
+      stripePaymentIntentId: paymentIntent.id,
+      // カード番号は保存しない
+      cardLast4: paymentIntent.payment_method?.card?.last4,
+      cardBrand: paymentIntent.payment_method?.card?.brand,
+      paidAt: new Date(),
+    },
+  });
+
+  // 決済ログを記録
+  await logAudit('PAYMENT_PROCESSED', customerId, 'payment', 'process', {
+    amount,
+    status: paymentIntent.status,
+    transactionId: paymentIntent.id,
+  });
+
+  return {
+    transactionId: paymentIntent.id,
+    status: paymentIntent.status,
+  };
+}
+
+export { processPayment };
+```
+
+### 金融商品取引法対応
+
+#### 取引履歴の保存
+
+```typescript
+/**
+ * 取引履歴の保存期間（法令準拠）
+ */
+const TRANSACTION_RETENTION_YEARS = 7;
+
+/**
+ * 取引履歴を記録
+ *
+ * @param transaction - 取引情報
+ */
+async function recordTransaction(transaction: {
+  userId: string;
+  type: 'deposit' | 'withdrawal' | 'trade';
+  amount: number;
+  currency: string;
+  details: Record<string, unknown>;
+}): Promise<void> {
+  await db.transaction.create({
+    data: {
+      userId: transaction.userId,
+      type: transaction.type,
+      amount: transaction.amount,
+      currency: transaction.currency,
+      details: JSON.stringify(transaction.details),
+      transactionDate: new Date(),
+    },
+  });
+
+  // 監査ログに記録
+  await logAudit('TRANSACTION_RECORDED', transaction.userId, 'transaction', 'record', {
+    type: transaction.type,
+    amount: transaction.amount,
+    currency: transaction.currency,
+  });
+}
+
+export { recordTransaction };
+```
+
+### マネーロンダリング対策
+
+#### 疑わしい取引の検知
+
+```typescript
+/**
+ * 疑わしい取引のフラグ
+ */
+const SUSPICIOUS_TRANSACTION_THRESHOLD = 1000000; // 100万円以上
+const RAPID_TRANSACTION_INTERVAL_MINUTES = 5; // 5分以内の連続取引
+const RAPID_TRANSACTION_COUNT = 10; // 10回以上
+
+/**
+ * 疑わしい取引を検知
+ *
+ * @param userId - ユーザーID
+ * @param amount - 取引金額
+ */
+async function detectSuspiciousTransaction(userId: string, amount: number): Promise<void> {
+  const suspicious = [];
+
+  // 高額取引の検知
+  if (amount >= SUSPICIOUS_TRANSACTION_THRESHOLD) {
+    suspicious.push('高額取引');
+  }
+
+  // 短時間に連続した取引の検知
+  const recentTransactions = await db.transaction.findMany({
+    where: {
+      userId,
+      transactionDate: {
+        gte: new Date(Date.now() - RAPID_TRANSACTION_INTERVAL_MINUTES * 60 * 1000),
+      },
+    },
+  });
+
+  if (recentTransactions.length >= RAPID_TRANSACTION_COUNT) {
+    suspicious.push('短時間に連続した取引');
+  }
+
+  // 疑わしい取引として記録
+  if (suspicious.length > 0) {
+    await db.suspiciousActivity.create({
+      data: {
+        userId,
+        amount,
+        reason: suspicious.join(', '),
+        detectedAt: new Date(),
+        status: 'pending_review',
+      },
+    });
+
+    // 監査ログに記録
+    await logAudit('SUSPICIOUS_TRANSACTION_DETECTED', userId, 'transaction', 'detect_suspicious', {
+      amount,
+      reason: suspicious,
+    });
+
+    // アラート通知（管理者に通知）
+    await notifyAdmins('疑わしい取引が検知されました', {
+      userId,
+      amount,
+      reason: suspicious,
+    });
+  }
+}
+
+export { detectSuspiciousTransaction };
+```
+
+---
+
+## 行政システム向けコンプライアンス
+
+### NISC（内閣サイバーセキュリティセンター）ガイドライン対応
+
+#### 政府情報システムセキュリティ要件
+
+```typescript
+/**
+ * 政府情報システムのセキュリティレベル
+ */
+type SecurityLevel = '機密性1' | '機密性2' | '機密性3';
+
+/**
+ * セキュリティレベルに応じた暗号化アルゴリズム
+ */
+const ENCRYPTION_ALGORITHMS = {
+  機密性1: 'aes-128-gcm', // 一般情報
+  機密性2: 'aes-256-gcm', // 機微情報
+  機密性3: 'aes-256-gcm', // 機密情報（追加の物理セキュリティ必要）
+} as const;
+
+/**
+ * セキュリティレベルに応じたデータ暗号化
+ *
+ * @param data - 暗号化するデータ
+ * @param level - セキュリティレベル
+ */
+function encryptBySecurityLevel(data: string, level: SecurityLevel): string {
+  const algorithm = ENCRYPTION_ALGORITHMS[level];
+
+  // セキュリティレベルに応じた暗号化処理
+  // （実装は security.mdc の encrypt 関数を参照）
+
+  return encrypt(data); // 実際はアルゴリズムを選択
+}
+
+export { encryptBySecurityLevel };
+```
+
+### 電子署名法対応
+
+#### 電子署名の実装
+
+```typescript
+import crypto from 'crypto';
+
+/**
+ * 電子署名を生成
+ *
+ * @param data - 署名対象データ
+ * @param privateKey - 秘密鍵
+ * @returns 電子署名（Base64エンコード）
+ */
+function signData(data: string, privateKey: string): string {
+  const sign = crypto.createSign('RSA-SHA256');
+  sign.update(data);
+  sign.end();
+
+  const signature = sign.sign(privateKey, 'base64');
+  return signature;
+}
+
+/**
+ * 電子署名を検証
+ *
+ * @param data - 署名対象データ
+ * @param signature - 電子署名（Base64エンコード）
+ * @param publicKey - 公開鍵
+ * @returns 署名が有効ならtrue
+ */
+function verifySignature(data: string, signature: string, publicKey: string): boolean {
+  const verify = crypto.createVerify('RSA-SHA256');
+  verify.update(data);
+  verify.end();
+
+  const isValid = verify.verify(publicKey, signature, 'base64');
+  return isValid;
+}
+
+export { signData, verifySignature };
+```
+
+---
+
+## コンプライアンスチェックリスト
+
+### 個人情報保護法対応
+
+- [ ] 個人情報の利用目的を明示
+- [ ] 本人同意を取得
+- [ ] 第三者提供の記録を保持
+- [ ] 開示請求に対応できる仕組み
+- [ ] 削除請求に対応できる仕組み
+- [ ] 安全管理措置を実施
+
+### 医療業界
+
+- [ ] 医療情報を暗号化
+- [ ] 医療従事者のアクセス制限
+- [ ] 閲覧履歴を記録
+- [ ] 患者本人の同意を取得
+
+### 金融業界
+
+- [ ] PCI DSS準拠（カード情報非保持）
+- [ ] 取引履歴を7年間保存
+- [ ] 疑わしい取引を検知・報告
+- [ ] マネーロンダリング対策
+
+### 行政システム
+
+- [ ] NISC ガイドライン準拠
+- [ ] セキュリティレベルに応じた暗号化
+- [ ] 電子署名の実装
+- [ ] 監査証跡の保持
+
+---
+
+## 参考資料
+
+### 法令・ガイドライン
+
+- [個人情報保護委員会](https://www.ppc.go.jp/)
+- [医療情報システムの安全管理に関するガイドライン](https://www.mhlw.go.jp/)
+- [PCI DSS](https://www.pcisecuritystandards.org/)
+- [金融庁](https://www.fsa.go.jp/)
+- [NISC（内閣サイバーセキュリティセンター）](https://www.nisc.go.jp/)

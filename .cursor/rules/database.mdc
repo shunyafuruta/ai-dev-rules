@@ -1,0 +1,502 @@
+---
+description: データベース設計規約とベストプラクティス
+globs:
+alwaysApply: true
+---
+
+# データベース設計規約
+
+**対象**: Prisma + MySQL/PostgreSQL
+
+---
+
+## スキーマ設計原則
+
+### 1. 命名規則
+
+#### テーブル名
+
+- **小文字のスネークケース**（snake_case）
+- **複数形**を使用
+
+```prisma
+// ✅ 良い例
+model users {
+  id String @id @default(uuid())
+}
+
+model contract_items {
+  id String @id @default(uuid())
+}
+
+// ❌ 悪い例
+model User {  // 大文字はNG
+  id String @id
+}
+
+model ContractItem {  // キャメルケースはNG
+  id String @id
+}
+```
+
+#### カラム名
+
+- **小文字のスネークケース**（snake_case）
+- 予約語を避ける
+
+```prisma
+model users {
+  id         String   @id @default(uuid())
+  email      String   @unique
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // ❌ 悪い例
+  // User       String   // 大文字はNG
+  // order      String   // 予約語はNG
+}
+```
+
+### 2. プライマリキー（Primary Key）
+
+**UUID を推奨**（セキュリティと分散性）
+
+```prisma
+model users {
+  // ✅ 推奨: UUID
+  id String @id @default(uuid())
+
+  // ❌ 非推奨: 連番（セキュリティリスク）
+  // id Int @id @default(autoincrement())
+}
+```
+
+### 3. 外部キー（Foreign Key）
+
+**ON DELETE / ON UPDATE を明示的に指定**
+
+```prisma
+model contracts {
+  id         String   @id @default(uuid())
+  student_id String
+  created_at DateTime @default(now())
+
+  // リレーション定義
+  student students @relation(fields: [student_id], references: [id], onDelete: Cascade)
+}
+
+model students {
+  id        String      @id @default(uuid())
+  name      String
+  contracts contracts[]
+}
+```
+
+**ON DELETE オプション**:
+
+- `Cascade`: 親が削除されたら子も削除
+- `SetNull`: 親が削除されたら子の外部キーをNULLに
+- `Restrict`: 子が存在する場合は親を削除できない（デフォルト）
+
+### 4. インデックス
+
+**検索・ソートに使用するカラムにインデックスを作成**
+
+```prisma
+model contracts {
+  id              String   @id @default(uuid())
+  contract_number String   @unique
+  student_id      String
+  status          String
+  created_at      DateTime @default(now())
+
+  student students @relation(fields: [student_id], references: [id])
+
+  // 複合インデックス（検索条件に応じて）
+  @@index([student_id, status])
+  @@index([created_at])
+}
+```
+
+**インデックスのベストプラクティス**:
+
+- 検索頻度の高いカラムにインデックスを作成
+- 複合インデックスの順序は検索条件の順序に合わせる
+- 過剰なインデックスは書き込み性能を低下させる
+
+### 5. 論理削除（Soft Delete）
+
+**削除フラグではなく、削除日時を使用**
+
+```prisma
+model users {
+  id         String    @id @default(uuid())
+  name       String
+  email      String    @unique
+  created_at DateTime  @default(now())
+  updated_at DateTime  @updatedAt
+  deleted_at DateTime? // NULL = 有効、日時 = 削除済み
+
+  @@index([deleted_at])
+}
+```
+
+**論理削除の実装**:
+
+```typescript
+/**
+ * ユーザーを論理削除する
+ *
+ * @param userId - ユーザーID
+ */
+async function softDeleteUser(userId: string): Promise<void> {
+  await db.users.update({
+    where: { id: userId },
+    data: { deleted_at: new Date() },
+  });
+}
+
+/**
+ * 有効なユーザーのみを取得
+ */
+async function getActiveUsers(): Promise<User[]> {
+  return db.users.findMany({
+    where: { deleted_at: null },
+  });
+}
+
+export { softDeleteUser, getActiveUsers };
+```
+
+---
+
+## データ型の選定
+
+### 文字列型
+
+| 用途                   | MySQL       | PostgreSQL  | Prisma      |
+| ---------------------- | ----------- | ----------- | ----------- |
+| 短い文字列（< 255文字）| VARCHAR(N)  | VARCHAR(N)  | String @db.VarChar(N) |
+| 長い文字列             | TEXT        | TEXT        | String @db.Text |
+| 固定長                 | CHAR(N)     | CHAR(N)     | String @db.Char(N) |
+
+```prisma
+model users {
+  id           String @id @default(uuid())
+  name         String @db.VarChar(100)
+  email        String @db.VarChar(255)
+  profile_text String @db.Text
+}
+```
+
+### 数値型
+
+| 用途                   | MySQL       | PostgreSQL  | Prisma      |
+| ---------------------- | ----------- | ----------- | ----------- |
+| 整数（小）             | INT         | INTEGER     | Int         |
+| 整数（大）             | BIGINT      | BIGINT      | BigInt      |
+| 小数                   | DECIMAL(M,D)| DECIMAL(M,D)| Decimal     |
+| 金額                   | DECIMAL(10,2)| DECIMAL(10,2)| Decimal @db.Decimal(10,2) |
+
+```prisma
+model contracts {
+  id          String  @id @default(uuid())
+  monthly_fee Decimal @db.Decimal(10, 2) // 金額は DECIMAL 型
+  duration    Int                          // 契約期間（月数）
+}
+```
+
+### 日時型
+
+```prisma
+model users {
+  id         String   @id @default(uuid())
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  deleted_at DateTime?
+}
+```
+
+### 列挙型（Enum）
+
+```prisma
+enum ContractStatus {
+  draft
+  confirmed
+  active
+  completed
+  cancelled
+}
+
+model contracts {
+  id     String         @id @default(uuid())
+  status ContractStatus @default(draft)
+}
+```
+
+---
+
+## N+1 問題対策
+
+### 問題のあるコード
+
+```typescript
+// ❌ N+1問題が発生
+const contracts = await db.contracts.findMany();
+
+for (const contract of contracts) {
+  // 各契約ごとにクエリが発行される（N回）
+  const student = await db.students.findUnique({
+    where: { id: contract.student_id },
+  });
+  console.log(student.name);
+}
+```
+
+### 解決策1: include を使用
+
+```typescript
+// ✅ 解決策: include で一度に取得
+const contracts = await db.contracts.findMany({
+  include: {
+    student: true, // students テーブルを JOIN
+  },
+});
+
+for (const contract of contracts) {
+  console.log(contract.student.name); // 追加クエリなし
+}
+```
+
+### 解決策2: select を使用（必要なフィールドのみ）
+
+```typescript
+// ✅ 解決策: select で必要なフィールドのみ取得
+const contracts = await db.contracts.findMany({
+  select: {
+    id: true,
+    contract_number: true,
+    student: {
+      select: {
+        id: true,
+        name: true,
+        email: true,
+      },
+    },
+  },
+});
+```
+
+---
+
+## トランザクション管理
+
+### トランザクションの基本
+
+```typescript
+/**
+ * 契約を作成し、支払いスケジュールを登録する（トランザクション）
+ *
+ * @param contractData - 契約データ
+ * @param paymentSchedule - 支払いスケジュール
+ */
+async function createContractWithPayments(
+  contractData: ContractInput,
+  paymentSchedule: PaymentScheduleInput[]
+): Promise<Contract> {
+  // トランザクションを開始
+  const result = await db.$transaction(async (tx) => {
+    // 契約を作成
+    const contract = await tx.contracts.create({
+      data: contractData,
+    });
+
+    // 支払いスケジュールを登録
+    await tx.payment_schedules.createMany({
+      data: paymentSchedule.map((schedule) => ({
+        contract_id: contract.id,
+        due_date: schedule.dueDate,
+        amount: schedule.amount,
+      })),
+    });
+
+    return contract;
+  });
+
+  return result;
+}
+
+export { createContractWithPayments };
+```
+
+### 楽観的ロック（Optimistic Locking）
+
+```prisma
+model contracts {
+  id              String   @id @default(uuid())
+  contract_number String
+  status          String
+  version         Int      @default(0) // バージョン番号
+  updated_at      DateTime @updatedAt
+}
+```
+
+```typescript
+/**
+ * 楽観的ロックを使用した契約更新
+ *
+ * @param contractId - 契約ID
+ * @param currentVersion - 現在のバージョン
+ * @param updateData - 更新データ
+ */
+async function updateContractWithOptimisticLock(
+  contractId: string,
+  currentVersion: number,
+  updateData: ContractUpdateInput
+): Promise<Contract> {
+  const updated = await db.contracts.updateMany({
+    where: {
+      id: contractId,
+      version: currentVersion, // バージョンが一致する場合のみ更新
+    },
+    data: {
+      ...updateData,
+      version: { increment: 1 }, // バージョンをインクリメント
+    },
+  });
+
+  // 更新件数が0の場合は競合が発生
+  if (updated.count === 0) {
+    throw new ConflictError('他のユーザーによって更新されています。再度読み込んでください。');
+  }
+
+  const contract = await db.contracts.findUnique({ where: { id: contractId } });
+  return contract!;
+}
+
+export { updateContractWithOptimisticLock };
+```
+
+---
+
+## パフォーマンス最適化
+
+### 1. ページネーション
+
+```typescript
+const PAGE_SIZE = 20;
+
+/**
+ * ページネーション付きで契約一覧を取得
+ *
+ * @param page - ページ番号（1から始まる）
+ */
+async function getContractsPaginated(page: number) {
+  const [contracts, total] = await Promise.all([
+    db.contracts.findMany({
+      skip: (page - 1) * PAGE_SIZE,
+      take: PAGE_SIZE,
+      orderBy: { created_at: 'desc' },
+    }),
+    db.contracts.count(),
+  ]);
+
+  return {
+    data: contracts,
+    pagination: {
+      page,
+      pageSize: PAGE_SIZE,
+      total,
+      totalPages: Math.ceil(total / PAGE_SIZE),
+    },
+  };
+}
+
+export { getContractsPaginated };
+```
+
+### 2. カーソルベースページネーション（大規模データ）
+
+```typescript
+/**
+ * カーソルベースページネーション
+ *
+ * @param cursor - 前ページの最後のID
+ * @param limit - 取得件数
+ */
+async function getContractsCursorBased(cursor?: string, limit: number = 20) {
+  const contracts = await db.contracts.findMany({
+    take: limit,
+    skip: cursor ? 1 : 0,
+    cursor: cursor ? { id: cursor } : undefined,
+    orderBy: { created_at: 'desc' },
+  });
+
+  return {
+    data: contracts,
+    nextCursor: contracts.length === limit ? contracts[contracts.length - 1].id : null,
+  };
+}
+
+export { getContractsCursorBased };
+```
+
+### 3. 集計クエリの最適化
+
+```typescript
+/**
+ * ダッシュボード統計を取得（最適化版）
+ */
+async function getDashboardStats() {
+  // 並列実行で高速化
+  const [totalContracts, activeContracts, totalRevenue] = await Promise.all([
+    db.contracts.count(),
+    db.contracts.count({ where: { status: 'active' } }),
+    db.payments.aggregate({
+      _sum: { amount: true },
+      where: { status: 'paid' },
+    }),
+  ]);
+
+  return {
+    totalContracts,
+    activeContracts,
+    totalRevenue: totalRevenue._sum.amount || 0,
+  };
+}
+
+export { getDashboardStats };
+```
+
+---
+
+## データベースチェックリスト
+
+### スキーマ設計
+
+- [ ] テーブル名・カラム名がsnake_case
+- [ ] プライマリキーはUUID
+- [ ] 外部キーにON DELETE/ON UPDATEを指定
+- [ ] 必要なカラムにインデックスを作成
+- [ ] 論理削除にdeleted_atを使用
+
+### パフォーマンス
+
+- [ ] N+1問題を回避（include/selectを使用）
+- [ ] ページネーションを実装
+- [ ] 集計クエリを並列実行
+- [ ] 適切なトランザクション管理
+
+### セキュリティ
+
+- [ ] 生SQLを使用しない（Prismaの型安全なクエリを使用）
+- [ ] 機密情報を暗号化
+- [ ] アクセス権限を適切に設定
+
+---
+
+## 参考資料
+
+- [Prisma Documentation](https://www.prisma.io/docs)
+- [MySQL Documentation](https://dev.mysql.com/doc/)
+- [PostgreSQL Documentation](https://www.postgresql.org/docs/)

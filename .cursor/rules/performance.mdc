@@ -1,0 +1,448 @@
+---
+description: パフォーマンス最適化基準
+globs:
+alwaysApply: true
+---
+
+# パフォーマンス最適化基準
+
+**目標**: 高速で快適なユーザー体験を提供する
+
+---
+
+## パフォーマンス目標
+
+### Core Web Vitals
+
+| メトリクス | 目標値 | 説明 |
+|-----------|--------|------|
+| **LCP** (Largest Contentful Paint) | < 2.5秒 | 最大コンテンツの描画時間 |
+| **FID** (First Input Delay) | < 100ms | 最初の入力までの遅延 |
+| **CLS** (Cumulative Layout Shift) | < 0.1 | レイアウトシフトの累積 |
+
+### その他のパフォーマンス指標
+
+| メトリクス | 目標値 | 説明 |
+|-----------|--------|------|
+| **FCP** (First Contentful Paint) | < 1.8秒 | 最初のコンテンツ描画時間 |
+| **TTI** (Time to Interactive) | < 3.8秒 | インタラクティブになるまでの時間 |
+| **TBT** (Total Blocking Time) | < 200ms | 合計ブロッキング時間 |
+| **API Response** | < 200ms (95th percentile) | APIレスポンスタイム |
+| **Database Query** | < 100ms (95th percentile) | データベースクエリ時間 |
+
+---
+
+## フロントエンドパフォーマンス
+
+### 1. バンドルサイズ最適化
+
+#### 目標値
+
+- **初期ロード**: < 200KB (gzip圧縮後)
+- **各ページ**: < 100KB (gzip圧縮後)
+
+#### コード分割（Code Splitting）
+
+```typescript
+import { lazy, Suspense } from 'react';
+import { LoadingSpinner } from '@/components/LoadingSpinner';
+
+// ページごとに遅延ロード
+const ContractListPage = lazy(() => import('@/pages/contract/ContractListPage'));
+const ContractDetailPage = lazy(() => import('@/pages/contract/ContractDetailPage'));
+
+function AppRouter() {
+  return (
+    <Suspense fallback={<LoadingSpinner />}>
+      <Routes>
+        <Route path="/contracts" element={<ContractListPage />} />
+        <Route path="/contracts/:id" element={<ContractDetailPage />} />
+      </Routes>
+    </Suspense>
+  );
+}
+
+export { AppRouter };
+```
+
+#### 依存関係の最適化
+
+```bash
+# バンドルサイズ分析
+npx vite-bundle-visualizer
+
+# 不要な依存関係を削除
+npm prune
+
+# 軽量な代替ライブラリを検討
+# 例: moment.js (288KB) → date-fns (78KB)
+```
+
+### 2. 画像最適化
+
+#### 画像フォーマット
+
+- **WebP**: モダンブラウザ向け（30%小さい）
+- **AVIF**: 次世代フォーマット（50%小さい）
+- **フォールバック**: JPEG/PNG
+
+```tsx
+<picture>
+  <source srcSet="/image.avif" type="image/avif" />
+  <source srcSet="/image.webp" type="image/webp" />
+  <img src="/image.jpg" alt="画像" loading="lazy" />
+</picture>
+```
+
+#### 遅延ロード
+
+```tsx
+<img src="/image.jpg" loading="lazy" alt="画像" />
+```
+
+#### レスポンシブ画像
+
+```tsx
+<img
+  src="/image-800.jpg"
+  srcSet="
+    /image-400.jpg 400w,
+    /image-800.jpg 800w,
+    /image-1200.jpg 1200w
+  "
+  sizes="(max-width: 600px) 400px, (max-width: 900px) 800px, 1200px"
+  alt="画像"
+/>
+```
+
+### 3. キャッシュ戦略
+
+#### ブラウザキャッシュ
+
+```typescript
+// vite.config.ts
+export default defineConfig({
+  build: {
+    rollupOptions: {
+      output: {
+        // ファイル名にハッシュを含める
+        entryFileNames: 'assets/[name].[hash].js',
+        chunkFileNames: 'assets/[name].[hash].js',
+        assetFileNames: 'assets/[name].[hash].[ext]',
+      },
+    },
+  },
+});
+```
+
+#### Service Worker（PWA）
+
+```typescript
+// service-worker.ts
+import { precacheAndRoute } from 'workbox-precaching';
+import { registerRoute } from 'workbox-routing';
+import { CacheFirst, NetworkFirst } from 'workbox-strategies';
+import { ExpirationPlugin } from 'workbox-expiration';
+
+// 静的アセットをプリキャッシュ
+precacheAndRoute(self.__WB_MANIFEST);
+
+// 画像のキャッシュ戦略
+registerRoute(
+  ({ request }) => request.destination === 'image',
+  new CacheFirst({
+    cacheName: 'images',
+    plugins: [
+      new ExpirationPlugin({
+        maxEntries: 60,
+        maxAgeSeconds: 30 * 24 * 60 * 60, // 30日
+      }),
+    ],
+  })
+);
+
+// APIのキャッシュ戦略（ネットワーク優先）
+registerRoute(
+  ({ url }) => url.pathname.startsWith('/api/'),
+  new NetworkFirst({
+    cacheName: 'api',
+    plugins: [
+      new ExpirationPlugin({
+        maxEntries: 50,
+        maxAgeSeconds: 5 * 60, // 5分
+      }),
+    ],
+  })
+);
+```
+
+### 4. 仮想スクロール
+
+```typescript
+import { FixedSizeList } from 'react-window';
+
+interface VirtualListProps {
+  items: Item[];
+}
+
+function VirtualList({ items }: VirtualListProps) {
+  const Row = ({ index, style }: { index: number; style: React.CSSProperties }) => (
+    <div style={style}>
+      <ItemCard item={items[index]} />
+    </div>
+  );
+
+  return (
+    <FixedSizeList
+      height={600}
+      itemCount={items.length}
+      itemSize={80}
+      width="100%"
+    >
+      {Row}
+    </FixedSizeList>
+  );
+}
+
+export { VirtualList };
+```
+
+---
+
+## バックエンドパフォーマンス
+
+### 1. データベースクエリ最適化
+
+#### インデックスの活用
+
+```prisma
+model contracts {
+  id              String   @id @default(uuid())
+  student_id      String
+  status          String
+  created_at      DateTime @default(now())
+
+  // 検索条件に応じたインデックス
+  @@index([student_id, status])
+  @@index([created_at])
+  @@index([status, created_at])
+}
+```
+
+#### N+1問題の回避
+
+```typescript
+// ❌ N+1問題
+const contracts = await db.contracts.findMany();
+for (const contract of contracts) {
+  const student = await db.students.findUnique({ where: { id: contract.student_id } });
+}
+
+// ✅ include で一度に取得
+const contracts = await db.contracts.findMany({
+  include: {
+    student: true,
+  },
+});
+```
+
+#### クエリの並列化
+
+```typescript
+// ❌ 逐次実行（遅い）
+const users = await db.users.findMany();
+const contracts = await db.contracts.findMany();
+const payments = await db.payments.findMany();
+
+// ✅ 並列実行（速い）
+const [users, contracts, payments] = await Promise.all([
+  db.users.findMany(),
+  db.contracts.findMany(),
+  db.payments.findMany(),
+]);
+```
+
+### 2. キャッシュ戦略
+
+#### Redis キャッシュ
+
+```typescript
+import Redis from 'ioredis';
+
+const redis = new Redis(process.env.REDIS_URL);
+
+/**
+ * キャッシュ付きデータ取得
+ *
+ * @param key - キャッシュキー
+ * @param fetchFn - データ取得関数
+ * @param ttl - キャッシュ有効期限（秒）
+ */
+async function getCached<T>(
+  key: string,
+  fetchFn: () => Promise<T>,
+  ttl: number = 300
+): Promise<T> {
+  // キャッシュから取得
+  const cached = await redis.get(key);
+  if (cached) {
+    return JSON.parse(cached);
+  }
+
+  // データベースから取得
+  const data = await fetchFn();
+
+  // キャッシュに保存
+  await redis.setex(key, ttl, JSON.stringify(data));
+
+  return data;
+}
+
+/**
+ * ダッシュボード統計（キャッシュ版）
+ */
+async function getDashboardStats() {
+  return getCached(
+    'dashboard:stats',
+    async () => {
+      const [totalContracts, activeContracts, totalRevenue] = await Promise.all([
+        db.contracts.count(),
+        db.contracts.count({ where: { status: 'active' } }),
+        db.payments.aggregate({
+          _sum: { amount: true },
+          where: { status: 'paid' },
+        }),
+      ]);
+
+      return {
+        totalContracts,
+        activeContracts,
+        totalRevenue: totalRevenue._sum.amount || 0,
+      };
+    },
+    60 // 1分間キャッシュ
+  );
+}
+
+export { getCached, getDashboardStats };
+```
+
+### 3. レート制限とスロットリング
+
+```typescript
+import rateLimit from 'express-rate-limit';
+
+// APIレート制限
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1分
+  max: 100, // 最大100リクエスト
+  message: 'リクエスト数が上限に達しました',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+app.use('/api/', apiLimiter);
+
+export { apiLimiter };
+```
+
+### 4. 非同期処理（ジョブキュー）
+
+```typescript
+import Bull from 'bull';
+
+// ジョブキューを作成
+const emailQueue = new Bull('email', process.env.REDIS_URL);
+
+/**
+ * メール送信ジョブを追加（非同期）
+ */
+async function sendEmailAsync(to: string, subject: string, body: string): Promise<void> {
+  await emailQueue.add({
+    to,
+    subject,
+    body,
+  });
+}
+
+// ジョブの処理
+emailQueue.process(async (job) => {
+  const { to, subject, body } = job.data;
+  await sendEmail(to, subject, body);
+});
+
+export { sendEmailAsync };
+```
+
+---
+
+## パフォーマンス計測
+
+### Lighthouse スコア
+
+```bash
+# Lighthouseでスコアを計測
+npx lighthouse https://example.com --view
+```
+
+**目標スコア**:
+- Performance: > 90
+- Accessibility: > 90
+- Best Practices: > 90
+- SEO: > 90
+
+### Web Vitals 計測
+
+```typescript
+import { getCLS, getFID, getFCP, getLCP, getTTFB } from 'web-vitals';
+
+function sendToAnalytics(metric: Metric) {
+  // アナリティクスに送信
+  const body = JSON.stringify(metric);
+  navigator.sendBeacon('/api/analytics', body);
+}
+
+getCLS(sendToAnalytics);
+getFID(sendToAnalytics);
+getFCP(sendToAnalytics);
+getLCP(sendToAnalytics);
+getTTFB(sendToAnalytics);
+```
+
+---
+
+## パフォーマンスチェックリスト
+
+### フロントエンド
+
+- [ ] バンドルサイズ < 200KB
+- [ ] コード分割を実装
+- [ ] 画像を最適化（WebP/AVIF）
+- [ ] 遅延ロードを実装
+- [ ] キャッシュ戦略を実装
+- [ ] 仮想スクロールを実装（大量データ）
+
+### バックエンド
+
+- [ ] データベースクエリを最適化
+- [ ] N+1問題を回避
+- [ ] インデックスを適切に設定
+- [ ] Redisキャッシュを実装
+- [ ] レート制限を設定
+- [ ] 非同期処理を実装
+
+### 計測
+
+- [ ] Lighthouse スコア > 90
+- [ ] Core Web Vitals を測定
+- [ ] APIレスポンスタイム < 200ms
+- [ ] データベースクエリ < 100ms
+
+---
+
+## 参考資料
+
+- [Web Vitals](https://web.dev/vitals/)
+- [Lighthouse](https://developers.google.com/web/tools/lighthouse)
+- [React Window](https://react-window.vercel.app/)
+- [Redis](https://redis.io/documentation)

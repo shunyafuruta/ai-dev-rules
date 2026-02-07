@@ -1,0 +1,379 @@
+---
+description: 依存関係管理とアップデート戦略
+globs:
+alwaysApply: true
+---
+
+# 依存関係管理
+
+**目的**: セキュアで安定した依存関係を維持する
+
+---
+
+## ライブラリ選定基準
+
+### 採用前の評価ポイント
+
+| 項目 | 基準 | 確認方法 |
+|------|------|----------|
+| **メンテナンス状況** | 直近6ヶ月以内に更新 | GitHubのCommit履歴 |
+| **人気度** | npm週間ダウンロード > 10万 | [npmtrends.com](https://npmtrends.com/) |
+| **セキュリティ** | 既知の脆弱性なし | `npm audit`, Snyk |
+| **ライセンス** | MIT, Apache 2.0など | package.json |
+| **TypeScript対応** | 型定義ファイルあり | `@types/*` または同梱 |
+| **バンドルサイズ** | 必要最小限 | [bundlephobia.com](https://bundlephobia.com/) |
+| **ドキュメント** | 充実した公式ドキュメント | 公式サイト |
+
+### ライブラリ選定例
+
+```typescript
+// ❌ 非推奨: 巨大なライブラリ
+import moment from 'moment'; // 288KB
+
+// ✅ 推奨: 軽量な代替
+import { format } from 'date-fns'; // 78KB
+
+// ❌ 非推奨: メンテナンスされていない
+import requestPromise from 'request-promise'; // Deprecated
+
+// ✅ 推奨: モダンな代替
+const response = await fetch(url); // Built-in
+```
+
+---
+
+## package.json管理
+
+### バージョン指定ルール
+
+```json
+{
+  "dependencies": {
+    // ✅ 正確なバージョン指定（本番環境で使用）
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+
+    // ✅ パッチバージョンのみ自動更新（推奨）
+    "express": "~4.18.2",
+
+    // ❌ メジャーバージョン自動更新（非推奨）
+    // "lodash": "^4.0.0"
+  },
+  "devDependencies": {
+    // 開発依存関係は ^ で柔軟に
+    "vite": "^5.0.0",
+    "vitest": "^1.0.0"
+  }
+}
+```
+
+**バージョン記号の意味**:
+- `1.2.3`: 正確なバージョン
+- `~1.2.3`: パッチバージョンのみ更新（1.2.x）
+- `^1.2.3`: マイナーバージョンまで更新（1.x.x）
+
+### lockファイルの管理
+
+**重要**: `package-lock.json` は必ずコミットする
+
+```bash
+# lockファイルを更新
+npm install
+
+# lockファイルを検証
+npm ci
+```
+
+---
+
+## 脆弱性管理
+
+### 定期的な脆弱性スキャン
+
+```bash
+# npm audit（週1回実行）
+npm audit
+
+# 修正可能な脆弱性を自動修正
+npm audit fix
+
+# 破壊的変更を含む修正（慎重に）
+npm audit fix --force
+```
+
+### Snyk による高度なスキャン
+
+```bash
+# Snykをインストール
+npm install -g snyk
+
+# Snykで脆弱性スキャン
+snyk test
+
+# Snykで自動修正
+snyk fix
+
+# Snykで継続的監視
+snyk monitor
+```
+
+### GitHub Dependabot設定
+
+```yaml
+# .github/dependabot.yml
+version: 2
+updates:
+  # npm依存関係の自動更新
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "your-team"
+    labels:
+      - "dependencies"
+    # セキュリティアップデートを優先
+    security-updates-only: false
+```
+
+---
+
+## アップデート戦略
+
+### アップデートの優先順位
+
+| 種類 | 優先度 | 対応タイミング |
+|------|--------|----------------|
+| **セキュリティパッチ** | 最高 | 即座（24時間以内） |
+| **メジャーバージョン** | 低 | 計画的（四半期ごと） |
+| **マイナーバージョン** | 中 | 月1回 |
+| **パッチバージョン** | 高 | 週1回 |
+
+### セキュリティアップデートの手順
+
+```bash
+# 1. 脆弱性を確認
+npm audit
+
+# 2. 修正可能な脆弱性を自動修正
+npm audit fix
+
+# 3. 手動で確認が必要な場合
+npm outdated
+
+# 4. 個別にアップデート
+npm update <package-name>
+
+# 5. テストを実行
+npm test
+
+# 6. コミット
+git add package.json package-lock.json
+git commit -m "security: update dependencies to fix vulnerabilities"
+```
+
+### メジャーバージョンアップデート
+
+```bash
+# 1. outdatedパッケージを確認
+npm outdated
+
+# 2. npm-check-updates で一括確認
+npx npm-check-updates
+
+# 3. アップデート候補を表示
+npx npm-check-updates -u --target minor
+
+# 4. package.jsonを更新
+npx npm-check-updates -u
+
+# 5. インストール
+npm install
+
+# 6. テストを実行
+npm test
+npm run test:e2e
+
+# 7. 動作確認
+npm run dev
+
+# 8. コミット
+git add package.json package-lock.json
+git commit -m "chore: update dependencies to latest versions"
+```
+
+---
+
+## 不要な依存関係の削除
+
+### 未使用パッケージの検出
+
+```bash
+# depcheckで未使用パッケージを検出
+npx depcheck
+
+# 結果例:
+# Unused dependencies
+# * lodash
+# * moment
+```
+
+### 削除手順
+
+```bash
+# パッケージを削除
+npm uninstall lodash moment
+
+# 未使用のパッケージを一括削除
+npm prune
+```
+
+---
+
+## CI/CDでの依存関係チェック
+
+### GitHub Actions設定
+
+```yaml
+# .github/workflows/dependencies.yml
+name: Dependencies Check
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'  # 毎週月曜9時
+  pull_request:
+  push:
+    branches: [main, develop]
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run npm audit
+        run: npm audit --audit-level=high
+
+      - name: Run Snyk security scan
+        uses: snyk/actions/node@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: Check for outdated packages
+        run: npm outdated || true
+
+      - name: Check for unused dependencies
+        run: npx depcheck
+```
+
+---
+
+## ライセンス管理
+
+### ライセンスの確認
+
+```bash
+# license-checkerでライセンスを確認
+npx license-checker --summary
+
+# 使用可能なライセンス
+# - MIT
+# - Apache-2.0
+# - BSD-3-Clause
+
+# 使用禁止のライセンス（要確認）
+# - GPL (コピーレフト)
+# - AGPL
+```
+
+### 禁止ライセンスの検出
+
+```bash
+# license-checker で禁止ライセンスを検出
+npx license-checker --onlyAllow "MIT;Apache-2.0;BSD-3-Clause;ISC"
+```
+
+---
+
+## ベストプラクティス
+
+### 1. 定期的なメンテナンス
+
+- **週1回**: `npm audit` で脆弱性チェック
+- **月1回**: パッチ・マイナーバージョンアップデート
+- **四半期ごと**: メジャーバージョンアップデート検討
+
+### 2. 依存関係の最小化
+
+```typescript
+// ❌ 悪い例: ライブラリ全体をインポート
+import _ from 'lodash';
+
+const result = _.map(items, item => item.name);
+
+// ✅ 良い例: 必要な関数のみインポート
+import map from 'lodash/map';
+
+const result = map(items, item => item.name);
+```
+
+### 3. ピアデペンデンシーの適切な管理
+
+```json
+{
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": false
+    }
+  }
+}
+```
+
+---
+
+## 依存関係チェックリスト
+
+### 新規パッケージ追加時
+
+- [ ] メンテナンス状況を確認
+- [ ] セキュリティ脆弱性を確認
+- [ ] ライセンスを確認
+- [ ] バンドルサイズを確認
+- [ ] TypeScript対応を確認
+- [ ] ドキュメントを確認
+
+### 定期メンテナンス
+
+- [ ] 週1回: `npm audit` 実行
+- [ ] 月1回: パッチ・マイナー更新
+- [ ] 四半期: メジャー更新検討
+- [ ] 未使用パッケージを削除
+
+### デプロイ前
+
+- [ ] `npm ci` でクリーンインストール
+- [ ] `npm audit` で脆弱性チェック
+- [ ] テストを全て実行
+- [ ] lockファイルをコミット
+
+---
+
+## 参考資料
+
+- [npm Documentation](https://docs.npmjs.com/)
+- [Snyk](https://snyk.io/)
+- [GitHub Dependabot](https://github.com/dependabot)
+- [Bundlephobia](https://bundlephobia.com/)

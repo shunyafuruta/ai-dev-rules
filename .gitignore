@@ -59,3 +59,13 @@ Thumbs.db
 .turbo
 .vercel
 .next/
+
+# Reference directory (local resources only)
+# 参照資料ディレクトリ（ローカルのみ、GitHubにはアップロードしない）
+reference/*
+!reference/.gitkeep
+!reference/README.md
+
+# Temporary extraction files
+extracted-files/
+*.zip

@@ -1,0 +1,601 @@
+---
+description: テスト戦略とテスト規約
+globs:
+alwaysApply: true
+---
+
+# テスト戦略
+
+**品質目標**: テストカバレッジ 90%以上、バグ検出率の最大化
+
+---
+
+## テストピラミッド
+
+```
+       /\
+      /E2E\         少数・遅い・高コスト
+     /------\
+    / 統合   \       中程度
+   /----------\
+  / ユニット  \     多数・速い・低コスト
+ /--------------\
+```
+
+### テストの配分比率
+
+- **ユニットテスト**: 70%（最も多く）
+- **統合テスト**: 20%
+- **E2Eテスト**: 10%（最小限）
+
+---
+
+## ユニットテスト
+
+### テストフレームワーク
+
+- **Vitest**: 高速な JavaScript/TypeScript テストランナー
+- **React Testing Library**: React コンポーネントのテスト
+
+### ファイル配置
+
+```
+apps/
+├── api/src/
+│   ├── lib/
+│   │   ├── prisma-helpers.ts
+│   │   └── __tests__/
+│   │       └── prisma-helpers.test.ts
+│   └── utils/
+│       ├── validation.ts
+│       └── __tests__/
+│           └── validation.test.ts
+└── web/src/
+    ├── components/
+    │   ├── Button.tsx
+    │   └── __tests__/
+    │       └── Button.test.tsx
+    └── hooks/
+        ├── useAuth.ts
+        └── __tests__/
+            └── useAuth.test.ts
+```
+
+### テスト命名規則
+
+**形式**: `describe` - `it` パターン
+
+```typescript
+import { describe, it, expect } from 'vitest';
+
+/**
+ * テスト対象: calculateTotalFee 関数
+ */
+describe('calculateTotalFee', () => {
+  // 正常系
+  it('個別指導の月額料金を正しく計算できる', () => {
+    const result = calculateTotalFee('individual', 12);
+    expect(result).toBe(50000);
+  });
+
+  it('集団指導の月額料金を正しく計算できる', () => {
+    const result = calculateTotalFee('group', 12);
+    expect(result).toBe(30000);
+  });
+
+  // 異常系
+  it('無効なコース種別の場合はエラーをスローする', () => {
+    expect(() => calculateTotalFee('invalid', 12)).toThrow('無効なコース種別です');
+  });
+
+  // 境界値
+  it('契約期間が0の場合はエラーをスローする', () => {
+    expect(() => calculateTotalFee('individual', 0)).toThrow(
+      '契約期間は1ヶ月以上である必要があります'
+    );
+  });
+});
+```
+
+### ユニットテストのベストプラクティス
+
+#### 1. AAA パターン（Arrange-Act-Assert）
+
+```typescript
+describe('Contract作成', () => {
+  it('正しい契約データで契約を作成できる', async () => {
+    // Arrange（準備）: テストデータを準備
+    const contractData = {
+      studentId: 'student-123',
+      courseType: 'individual',
+      startDate: new Date('2024-04-01'),
+      monthlyFee: 50000,
+    };
+
+    // Act（実行）: テスト対象の関数を実行
+    const contract = await createContract(contractData);
+
+    // Assert（検証）: 結果を検証
+    expect(contract.id).toBeDefined();
+    expect(contract.studentId).toBe('student-123');
+    expect(contract.status).toBe('draft');
+  });
+});
+```
+
+#### 2. テストの独立性（各テストは独立して実行可能）
+
+```typescript
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+
+describe('User CRUD操作', () => {
+  // 各テスト前にデータベースをリセット
+  beforeEach(async () => {
+    await resetDatabase();
+  });
+
+  // 各テスト後にクリーンアップ
+  afterEach(async () => {
+    await clearTestData();
+  });
+
+  it('ユーザーを作成できる', async () => {
+    const user = await createUser({ name: 'Alice', email: 'alice@example.com' });
+    expect(user.id).toBeDefined();
+  });
+
+  it('ユーザーを更新できる', async () => {
+    const user = await createUser({ name: 'Bob', email: 'bob@example.com' });
+    const updated = await updateUser(user.id, { name: 'Bob Smith' });
+    expect(updated.name).toBe('Bob Smith');
+  });
+});
+```
+
+#### 3. モック・スタブの適切な使用
+
+```typescript
+import { describe, it, expect, vi } from 'vitest';
+
+// データベースをモック化
+vi.mock('@/lib/prisma', () => ({
+  db: {
+    user: {
+      findUnique: vi.fn(),
+      create: vi.fn(),
+    },
+  },
+}));
+
+import { db } from '@/lib/prisma';
+
+describe('getUser', () => {
+  it('存在するユーザーIDの場合、ユーザー情報を返す', async () => {
+    // モックの戻り値を設定
+    const mockUser = { id: 'user-123', name: 'Alice', email: 'alice@example.com' };
+    vi.mocked(db.user.findUnique).mockResolvedValue(mockUser);
+
+    const user = await getUser('user-123');
+
+    expect(user).toEqual(mockUser);
+    expect(db.user.findUnique).toHaveBeenCalledWith({ where: { id: 'user-123' } });
+  });
+
+  it('存在しないユーザーIDの場合、NotFoundErrorをスローする', async () => {
+    vi.mocked(db.user.findUnique).mockResolvedValue(null);
+
+    await expect(getUser('invalid-id')).rejects.toThrow(NotFoundError);
+  });
+});
+```
+
+### React コンポーネントのテスト
+
+```typescript
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { Button } from '@/components/Button';
+
+describe('Button コンポーネント', () => {
+  it('正しくレンダリングされる', () => {
+    render(<Button>クリック</Button>);
+    expect(screen.getByRole('button', { name: 'クリック' })).toBeInTheDocument();
+  });
+
+  it('クリックイベントが正しく発火する', async () => {
+    const handleClick = vi.fn();
+    render(<Button onClick={handleClick}>クリック</Button>);
+
+    const button = screen.getByRole('button', { name: 'クリック' });
+    await userEvent.click(button);
+
+    expect(handleClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('disabled状態の場合、クリックできない', () => {
+    const handleClick = vi.fn();
+    render(
+      <Button onClick={handleClick} disabled>
+        クリック
+      </Button>
+    );
+
+    const button = screen.getByRole('button', { name: 'クリック' });
+    expect(button).toBeDisabled();
+  });
+});
+```
+
+### カスタムフックのテスト
+
+```typescript
+import { describe, it, expect } from 'vitest';
+import { renderHook, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { useContract } from '@/hooks/useContract';
+
+describe('useContract', () => {
+  it('契約データを正しく取得できる', async () => {
+    // QueryClientのセットアップ
+    const queryClient = new QueryClient();
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+
+    const { result } = renderHook(() => useContract('contract-123'), { wrapper });
+
+    // ローディング状態を確認
+    expect(result.current.isLoading).toBe(true);
+
+    // データ取得完了を待つ
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    // データを確認
+    expect(result.current.data).toBeDefined();
+    expect(result.current.data?.id).toBe('contract-123');
+  });
+});
+```
+
+---
+
+## 統合テスト
+
+### APIエンドポイントのテスト
+
+```typescript
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import request from 'supertest';
+import app from '@/app';
+
+describe('GET /api/contracts/:id', () => {
+  const testUserId = 'test-user-123';
+  const testContractId = 'test-contract-123';
+  const authToken = '...'; // テスト用認証トークン
+
+  beforeAll(async () => {
+    // テストデータを準備
+    await createTestContract(testContractId, testUserId);
+  });
+
+  afterAll(async () => {
+    // テストデータをクリーンアップ
+    await deleteTestContract(testContractId);
+  });
+
+  it('正常系: 契約情報を取得できる', async () => {
+    const response = await request(app)
+      .get(`/api/contracts/${testContractId}`)
+      .set('Authorization', `Bearer ${authToken}`)
+      .expect(200);
+
+    expect(response.body.id).toBe(testContractId);
+    expect(response.body.studentId).toBe(testUserId);
+  });
+
+  it('異常系: 存在しない契約IDの場合、404エラーを返す', async () => {
+    const response = await request(app)
+      .get('/api/contracts/invalid-id')
+      .set('Authorization', `Bearer ${authToken}`)
+      .expect(404);
+
+    expect(response.body.error).toBe('契約が見つかりません');
+  });
+
+  it('異常系: 認証トークンがない場合、401エラーを返す', async () => {
+    await request(app).get(`/api/contracts/${testContractId}`).expect(401);
+  });
+});
+```
+
+---
+
+## E2Eテスト
+
+### テストフレームワーク
+
+- **Playwright**: 高速で信頼性の高いE2Eテスト
+
+### E2Eテストの配置
+
+```
+tests/
+└── e2e/
+    ├── auth.spec.ts
+    ├── contract-search.spec.ts
+    └── contract-create.spec.ts
+```
+
+### E2Eテストの基本構成
+
+```typescript
+import { test, expect } from '@playwright/test';
+
+test.describe('契約検索機能', () => {
+  test.beforeEach(async ({ page }) => {
+    // ログイン
+    await page.goto('http://localhost:5173/login');
+    await page.fill('[name="email"]', 'test@example.com');
+    await page.fill('[name="password"]', 'password123');
+    await page.click('button[type="submit"]');
+    await page.waitForURL('http://localhost:5173/dashboard');
+  });
+
+  test('契約番号で検索できる', async ({ page }) => {
+    // 契約検索ページに移動
+    await page.goto('http://localhost:5173/contracts');
+
+    // 契約番号で検索
+    await page.fill('[name="contractNumber"]', 'C-2024-001');
+    await page.click('button:has-text("検索")');
+
+    // 検索結果を確認
+    await expect(page.locator('table tbody tr')).toHaveCount(1);
+    await expect(page.locator('table tbody tr:first-child')).toContainText('C-2024-001');
+  });
+
+  test('ステータスでフィルタリングできる', async ({ page }) => {
+    await page.goto('http://localhost:5173/contracts');
+
+    // ステータスフィルタを選択
+    await page.selectOption('[name="status"]', 'active');
+    await page.click('button:has-text("検索")');
+
+    // 全ての結果が「進行中」ステータスであることを確認
+    const rows = page.locator('table tbody tr');
+    const count = await rows.count();
+
+    for (let i = 0; i < count; i++) {
+      await expect(rows.nth(i)).toContainText('進行中');
+    }
+  });
+});
+```
+
+---
+
+## テストカバレッジ
+
+### カバレッジ目標
+
+- **全体**: 90%以上
+- **重要なビジネスロジック**: 100%
+- **ユーティリティ関数**: 95%以上
+
+### カバレッジレポートの生成
+
+```bash
+# ユニットテスト + カバレッジ
+npm run test:coverage
+
+# カバレッジレポートを確認
+open coverage/index.html
+```
+
+### カバレッジ基準
+
+```json
+// vitest.config.ts
+export default defineConfig({
+  test: {
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json', 'html'],
+      lines: 90,
+      functions: 90,
+      branches: 90,
+      statements: 90,
+      exclude: [
+        'node_modules/',
+        'dist/',
+        '**/*.config.ts',
+        '**/*.d.ts',
+        '**/__tests__/**',
+      ],
+    },
+  },
+});
+```
+
+---
+
+## テストデータ管理
+
+### ファクトリーパターン
+
+```typescript
+/**
+ * テスト用のユーザーデータを生成
+ */
+function createTestUser(overrides?: Partial<User>): User {
+  return {
+    id: `test-user-${Date.now()}`,
+    name: 'Test User',
+    email: `test-${Date.now()}@example.com`,
+    role: 'staff',
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...overrides,
+  };
+}
+
+/**
+ * テスト用の契約データを生成
+ */
+function createTestContract(overrides?: Partial<Contract>): Contract {
+  return {
+    id: `test-contract-${Date.now()}`,
+    contractNumber: `C-TEST-${Date.now()}`,
+    studentId: 'test-student-123',
+    status: 'draft',
+    startDate: new Date(),
+    monthlyFee: 50000,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...overrides,
+  };
+}
+
+export { createTestUser, createTestContract };
+```
+
+---
+
+## テストのベストプラクティス
+
+### 1. テストは読みやすく、保守しやすく
+
+```typescript
+// ❌ 悪い例: テストの意図が不明確
+it('test1', () => {
+  const result = fn('a', 1);
+  expect(result).toBe(10);
+});
+
+// ✅ 良い例: テストの意図が明確
+it('個別指導の契約期間1ヶ月の場合、月額料金50,000円を返す', () => {
+  const totalFee = calculateTotalFee('individual', 1);
+  expect(totalFee).toBe(50000);
+});
+```
+
+### 2. 各テストは独立している
+
+```typescript
+// ❌ 悪い例: 前のテストに依存
+it('ユーザーを作成', () => {
+  user = createUser({ name: 'Alice' });
+});
+
+it('ユーザーを更新', () => {
+  updateUser(user.id, { name: 'Alice Smith' }); // 前のテストに依存
+});
+
+// ✅ 良い例: 独立したテスト
+it('ユーザーを更新できる', () => {
+  const user = createUser({ name: 'Alice' });
+  const updated = updateUser(user.id, { name: 'Alice Smith' });
+  expect(updated.name).toBe('Alice Smith');
+});
+```
+
+### 3. 適切なアサーション
+
+```typescript
+// ❌ 悪い例: 曖昧なアサーション
+expect(result).toBeTruthy();
+
+// ✅ 良い例: 具体的なアサーション
+expect(result).toBe(50000);
+expect(contract.status).toBe('active');
+expect(user.email).toMatch(/^[^\s@]+@[^\s@]+\.[^\s@]+$/);
+```
+
+---
+
+## テスト実行
+
+### ローカル環境
+
+```bash
+# 全テストを実行
+npm run test
+
+# ユニットテストのみ実行
+npm run test:unit
+
+# 統合テストのみ実行
+npm run test:integration
+
+# E2Eテストのみ実行
+npm run test:e2e
+
+# ウォッチモード（開発中）
+npm run test:watch
+
+# カバレッジレポート生成
+npm run test:coverage
+```
+
+### CI/CD環境
+
+```yaml
+# .github/workflows/test.yml
+name: Test
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - run: npm ci
+      - run: npm run test:coverage
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage/coverage-final.json
+```
+
+---
+
+## テストチェックリスト
+
+### ユニットテスト
+
+- [ ] 正常系をテスト
+- [ ] 異常系をテスト
+- [ ] 境界値をテスト
+- [ ] エッジケースをテスト
+- [ ] モック/スタブを適切に使用
+
+### 統合テスト
+
+- [ ] APIエンドポイントの正常系をテスト
+- [ ] 認証/認可をテスト
+- [ ] エラーハンドリングをテスト
+- [ ] データベース操作をテスト
+
+### E2Eテスト
+
+- [ ] 主要なユーザーフローをテスト
+- [ ] クリティカルパスをテスト
+- [ ] 複数ブラウザで動作確認
+
+---
+
+## 参考資料
+
+- [Vitest Documentation](https://vitest.dev/)
+- [React Testing Library](https://testing-library.com/react)
+- [Playwright Documentation](https://playwright.dev/)

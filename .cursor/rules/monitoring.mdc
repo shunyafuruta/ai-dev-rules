@@ -1,0 +1,480 @@
+---
+description: モニタリング・ログ戦略
+globs:
+alwaysApply: true
+---
+
+# モニタリング・ログ戦略
+
+**目的**: システムの健全性を監視し、問題を早期発見・解決する
+
+---
+
+## ログレベル
+
+### ログレベルの定義
+
+| レベル | 用途 | 例 |
+|--------|------|-----|
+| **DEBUG** | デバッグ情報（開発環境のみ） | 変数の値、関数の呼び出し |
+| **INFO** | 一般的な情報 | リクエスト処理、正常な処理完了 |
+| **WARN** | 警告（エラーではないが注意が必要） | 非推奨API使用、リトライ発生 |
+| **ERROR** | エラー（処理は継続可能） | バリデーションエラー、API呼び出し失敗 |
+| **FATAL** | 致命的エラー（処理継続不可） | データベース接続失敗、メモリ不足 |
+
+### ログレベルの実装
+
+```typescript
+/**
+ * ログレベル
+ */
+enum LogLevel {
+  DEBUG = 'debug',
+  INFO = 'info',
+  WARN = 'warn',
+  ERROR = 'error',
+  FATAL = 'fatal',
+}
+
+/**
+ * ロガー
+ */
+class Logger {
+  private level: LogLevel;
+
+  constructor() {
+    // 環境に応じたログレベル
+    this.level = process.env.NODE_ENV === 'production' ? LogLevel.INFO : LogLevel.DEBUG;
+  }
+
+  /**
+   * DEBUGログ（開発環境のみ）
+   */
+  debug(message: string, meta?: Record<string, unknown>): void {
+    if (this.shouldLog(LogLevel.DEBUG)) {
+      this.log(LogLevel.DEBUG, message, meta);
+    }
+  }
+
+  /**
+   * INFOログ
+   */
+  info(message: string, meta?: Record<string, unknown>): void {
+    if (this.shouldLog(LogLevel.INFO)) {
+      this.log(LogLevel.INFO, message, meta);
+    }
+  }
+
+  /**
+   * WARNログ
+   */
+  warn(message: string, meta?: Record<string, unknown>): void {
+    if (this.shouldLog(LogLevel.WARN)) {
+      this.log(LogLevel.WARN, message, meta);
+    }
+  }
+
+  /**
+   * ERRORログ
+   */
+  error(message: string, error?: Error, meta?: Record<string, unknown>): void {
+    if (this.shouldLog(LogLevel.ERROR)) {
+      this.log(LogLevel.ERROR, message, {
+        ...meta,
+        error: {
+          message: error?.message,
+          stack: error?.stack,
+          name: error?.name,
+        },
+      });
+    }
+  }
+
+  /**
+   * FATALログ
+   */
+  fatal(message: string, error?: Error, meta?: Record<string, unknown>): void {
+    if (this.shouldLog(LogLevel.FATAL)) {
+      this.log(LogLevel.FATAL, message, {
+        ...meta,
+        error: {
+          message: error?.message,
+          stack: error?.stack,
+          name: error?.name,
+        },
+      });
+    }
+  }
+
+  /**
+   * ログレベル判定
+   */
+  private shouldLog(level: LogLevel): boolean {
+    const levels = [LogLevel.DEBUG, LogLevel.INFO, LogLevel.WARN, LogLevel.ERROR, LogLevel.FATAL];
+    return levels.indexOf(level) >= levels.indexOf(this.level);
+  }
+
+  /**
+   * ログ出力
+   */
+  private log(level: LogLevel, message: string, meta?: Record<string, unknown>): void {
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      level,
+      message,
+      ...meta,
+    };
+
+    // 本番環境: JSON形式で出力
+    if (process.env.NODE_ENV === 'production') {
+      console.log(JSON.stringify(logEntry));
+    } else {
+      // 開発環境: 読みやすい形式で出力
+      console.log(`[${logEntry.level.toUpperCase()}] ${logEntry.message}`, meta || '');
+    }
+  }
+}
+
+const logger = new Logger();
+export { logger };
+```
+
+---
+
+## 構造化ログ
+
+### JSON形式のログ出力
+
+```typescript
+/**
+ * 構造化ログエントリ
+ */
+interface StructuredLog {
+  timestamp: string;
+  level: LogLevel;
+  message: string;
+  userId?: string;
+  requestId?: string;
+  method?: string;
+  url?: string;
+  statusCode?: number;
+  duration?: number;
+  error?: {
+    message: string;
+    stack?: string;
+    name: string;
+  };
+  [key: string]: unknown;
+}
+
+/**
+ * リクエストログ
+ */
+function logRequest(req: Request, res: Response, duration: number): void {
+  logger.info('HTTP Request', {
+    requestId: req.id,
+    method: req.method,
+    url: req.url,
+    statusCode: res.statusCode,
+    duration,
+    userId: req.user?.id,
+    ipAddress: getClientIP(req),
+    userAgent: req.headers['user-agent'],
+  });
+}
+
+export { logRequest };
+```
+
+---
+
+## アプリケーションパフォーマンス監視（APM）
+
+### レスポンスタイム計測
+
+```typescript
+/**
+ * パフォーマンス計測ミドルウェア
+ */
+function performanceMiddleware(req: Request, res: Response, next: NextFunction): void {
+  const startTime = Date.now();
+
+  // レスポンス送信後に計測
+  res.on('finish', () => {
+    const duration = Date.now() - startTime;
+
+    // 遅いリクエストを警告
+    if (duration > 1000) {
+      logger.warn('Slow request detected', {
+        method: req.method,
+        url: req.url,
+        duration,
+      });
+    }
+
+    // パフォーマンスメトリクスを記録
+    recordMetric('http_request_duration_ms', duration, {
+      method: req.method,
+      route: req.route?.path,
+      statusCode: res.statusCode,
+    });
+  });
+
+  next();
+}
+
+export { performanceMiddleware };
+```
+
+### データベースクエリ監視
+
+```typescript
+/**
+ * Prismaクエリログ
+ */
+const db = new PrismaClient({
+  log: [
+    {
+      emit: 'event',
+      level: 'query',
+    },
+  ],
+});
+
+db.$on('query', (e) => {
+  // 遅いクエリを警告
+  if (e.duration > 100) {
+    logger.warn('Slow database query', {
+      query: e.query,
+      duration: e.duration,
+      params: e.params,
+    });
+  }
+});
+
+export { db };
+```
+
+---
+
+## エラー追跡（Sentry連携）
+
+### Sentryセットアップ
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+/**
+ * Sentryを初期化
+ */
+Sentry.init({
+  dsn: process.env.SENTRY_DSN,
+  environment: process.env.NODE_ENV,
+  tracesSampleRate: 0.1, // 10%のトランザクションをサンプリング
+});
+
+/**
+ * Sentryエラーハンドラ
+ */
+function sentryErrorHandler(err: Error, req: Request, res: Response, next: NextFunction): void {
+  // Sentryにエラーを送信
+  Sentry.captureException(err, {
+    user: {
+      id: req.user?.id,
+      email: req.user?.email,
+    },
+    extra: {
+      method: req.method,
+      url: req.url,
+      body: req.body,
+    },
+  });
+
+  next(err);
+}
+
+export { sentryErrorHandler };
+```
+
+---
+
+## ヘルスチェック
+
+### ヘルスチェックエンドポイント
+
+```typescript
+/**
+ * ヘルスチェック
+ */
+async function healthCheck(req: Request, res: Response): Promise<void> {
+  const health = {
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    checks: {
+      database: 'ok',
+      redis: 'ok',
+    },
+  };
+
+  try {
+    // データベース接続チェック
+    await db.$queryRaw`SELECT 1`;
+  } catch (error) {
+    health.status = 'error';
+    health.checks.database = 'error';
+  }
+
+  const statusCode = health.status === 'ok' ? 200 : 503;
+  res.status(statusCode).json(health);
+}
+
+// ヘルスチェックエンドポイント
+app.get('/health', healthCheck);
+
+export { healthCheck };
+```
+
+---
+
+## メトリクス収集
+
+### Prometheusメトリクス
+
+```typescript
+import promClient from 'prom-client';
+
+// レジストリを作成
+const register = new promClient.Registry();
+
+// デフォルトメトリクスを収集
+promClient.collectDefaultMetrics({ register });
+
+// カスタムメトリクス
+const httpRequestDuration = new promClient.Histogram({
+  name: 'http_request_duration_seconds',
+  help: 'Duration of HTTP requests in seconds',
+  labelNames: ['method', 'route', 'status_code'],
+  registers: [register],
+});
+
+/**
+ * メトリクスエンドポイント
+ */
+async function metricsEndpoint(req: Request, res: Response): Promise<void> {
+  res.set('Content-Type', register.contentType);
+  res.send(await register.metrics());
+}
+
+app.get('/metrics', metricsEndpoint);
+
+export { httpRequestDuration };
+```
+
+---
+
+## アラート設定
+
+### 重要なアラート条件
+
+```yaml
+# alerts.yml
+groups:
+  - name: application_alerts
+    rules:
+      # エラー率が5%を超えた場合
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status_code=~"5.."}[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High error rate detected"
+
+      # レスポンスタイムが1秒を超えた場合
+      - alert: SlowResponse
+        expr: histogram_quantile(0.95, http_request_duration_seconds) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Slow response time detected"
+
+      # データベース接続エラー
+      - alert: DatabaseConnectionError
+        expr: up{job="database"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Database connection failed"
+```
+
+---
+
+## ログ保持ポリシー
+
+### 保持期間
+
+| ログ種別 | 保持期間 | 理由 |
+|----------|----------|------|
+| アクセスログ | 90日 | 一般的なトラブルシューティング |
+| エラーログ | 1年 | バグ調査、トレンド分析 |
+| 監査ログ | 7年 | 法令対応（金融・医療） |
+| パフォーマンスログ | 30日 | 最適化のための分析 |
+
+### ログローテーション
+
+```bash
+# logrotate.conf
+/var/log/app/*.log {
+    daily
+    rotate 90
+    compress
+    delaycompress
+    notifempty
+    create 0640 app app
+    sharedscripts
+    postrotate
+        /usr/bin/killall -SIGUSR1 node
+    endscript
+}
+```
+
+---
+
+## モニタリングチェックリスト
+
+### ログ
+
+- [ ] ログレベルを適切に設定
+- [ ] 構造化ログ（JSON形式）を使用
+- [ ] 機密情報をログに含めない
+- [ ] ログローテーションを設定
+
+### パフォーマンス
+
+- [ ] レスポンスタイムを監視
+- [ ] データベースクエリを監視
+- [ ] メモリ使用量を監視
+- [ ] CPU使用率を監視
+
+### エラー追跡
+
+- [ ] Sentryを設定
+- [ ] エラー通知を設定
+- [ ] エラーレートを監視
+
+### アラート
+
+- [ ] 重要なメトリクスにアラートを設定
+- [ ] オンコール体制を整備
+- [ ] エスカレーションルールを定義
+
+---
+
+## 参考資料
+
+- [Sentry Documentation](https://docs.sentry.io/)
+- [Prometheus Documentation](https://prometheus.io/docs/)
+- [Winston Logger](https://github.com/winstonjs/winston)

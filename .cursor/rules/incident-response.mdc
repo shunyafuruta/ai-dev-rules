@@ -1,0 +1,445 @@
+---
+description: インシデント対応計画
+globs:
+alwaysApply: true
+---
+
+# インシデント対応計画
+
+**目的**: セキュリティインシデントや障害に迅速かつ適切に対応する
+
+---
+
+## インシデントの定義
+
+### インシデントレベル
+
+| レベル | 定義 | 例 | 対応時間 |
+|--------|------|-----|----------|
+| **P1 (Critical)** | サービス全停止、データ漏洩 | システムダウン、個人情報流出 | 即時（15分以内） |
+| **P2 (High)** | 主要機能の停止 | 決済機能停止、認証エラー | 1時間以内 |
+| **P3 (Medium)** | 一部機能の停止 | 検索機能の不具合 | 4時間以内 |
+| **P4 (Low)** | 軽微な不具合 | 表示崩れ、誤字 | 24時間以内 |
+
+---
+
+## インシデント対応フロー
+
+### 1. 検知（Detection）
+
+#### 自動検知
+
+```typescript
+/**
+ * 異常検知アラート
+ */
+async function detectAnomalies(): Promise<void> {
+  // エラー率が5%を超えた場合
+  const errorRate = await getErrorRate();
+  if (errorRate > 0.05) {
+    await sendAlert('HIGH_ERROR_RATE', {
+      errorRate,
+      threshold: 0.05,
+    });
+  }
+
+  // レスポンスタイムが1秒を超えた場合
+  const avgResponseTime = await getAverageResponseTime();
+  if (avgResponseTime > 1000) {
+    await sendAlert('SLOW_RESPONSE', {
+      avgResponseTime,
+      threshold: 1000,
+    });
+  }
+
+  // データベース接続エラー
+  try {
+    await db.$queryRaw`SELECT 1`;
+  } catch (error) {
+    await sendAlert('DATABASE_CONNECTION_ERROR', {
+      error: error.message,
+    });
+  }
+}
+
+export { detectAnomalies };
+```
+
+#### 手動報告
+
+- ユーザーからの問い合わせ
+- 監視ダッシュボードの異常値
+- チーム内での気づき
+
+### 2. トリアージ（Triage）
+
+```typescript
+/**
+ * インシデントを記録
+ */
+interface IncidentReport {
+  id: string;
+  title: string;
+  level: 'P1' | 'P2' | 'P3' | 'P4';
+  description: string;
+  detectedAt: Date;
+  reportedBy: string;
+  affectedUsers?: number;
+  status: 'open' | 'investigating' | 'resolved' | 'closed';
+}
+
+/**
+ * インシデントを作成
+ */
+async function createIncident(data: Omit<IncidentReport, 'id' | 'detectedAt' | 'status'>): Promise<IncidentReport> {
+  const incident = await db.incident.create({
+    data: {
+      id: generateId(),
+      ...data,
+      detectedAt: new Date(),
+      status: 'open',
+    },
+  });
+
+  // アラート送信
+  await notifyIncident(incident);
+
+  return incident;
+}
+
+export { createIncident };
+```
+
+### 3. 対応（Response）
+
+#### P1（Critical）対応手順
+
+1. **即座に対応チームを招集**（15分以内）
+2. **インシデント対応チャンネルを作成**（Slack）
+3. **影響範囲を特定**
+4. **緊急メンテナンス告知**（ユーザー向け）
+5. **応急処置を実施**
+6. **根本原因を調査**
+7. **恒久対策を実施**
+
+#### 緊急メンテナンス告知テンプレート
+
+```typescript
+/**
+ * 緊急メンテナンス告知
+ */
+async function announceEmergencyMaintenance(
+  title: string,
+  estimatedDuration: string
+): Promise<void> {
+  const message = {
+    title: '【緊急メンテナンスのお知らせ】',
+    content: `
+現在、システムに不具合が発生しており、緊急メンテナンスを実施しております。
+
+■ 影響範囲
+${title}
+
+■ 復旧予定
+${estimatedDuration}
+
+ご不便をおかけして大変申し訳ございません。
+復旧次第、改めてお知らせいたします。
+    `,
+  };
+
+  // ユーザーに通知
+  await sendNotificationToAllUsers(message);
+
+  // ステータスページを更新
+  await updateStatusPage('maintenance', message);
+}
+
+export { announceEmergencyMaintenance };
+```
+
+### 4. 復旧（Recovery）
+
+```typescript
+/**
+ * ロールバック実行
+ */
+async function rollback(version: string): Promise<void> {
+  logger.info('Starting rollback', { version });
+
+  // 1. デプロイメントをロールバック
+  await execCommand(`./scripts/rollback.sh ${version}`);
+
+  // 2. ヘルスチェック
+  await waitForHealthCheck();
+
+  // 3. 動作確認
+  await performSmokeTest();
+
+  logger.info('Rollback completed successfully', { version });
+}
+
+export { rollback };
+```
+
+### 5. 事後対応（Post-Incident）
+
+#### インシデント報告書
+
+```markdown
+# インシデント報告書
+
+## 基本情報
+- **インシデントID**: INC-2024-001
+- **レベル**: P1
+- **発生日時**: 2024-01-15 14:30 JST
+- **復旧日時**: 2024-01-15 15:45 JST
+- **影響時間**: 1時間15分
+
+## 概要
+データベース接続エラーにより、全サービスが停止
+
+## 影響範囲
+- 影響ユーザー数: 1,200名
+- 影響機能: 全機能
+
+## 原因
+データベースサーバーのディスク容量が満杯になり、接続不可に
+
+## 対応内容
+1. 14:35 - インシデント検知
+2. 14:40 - 対応チーム招集
+3. 14:50 - 原因特定（ディスク容量不足）
+4. 15:00 - 不要なログファイルを削除
+5. 15:15 - データベース再起動
+6. 15:30 - サービス復旧
+7. 15:45 - 正常動作確認完了
+
+## 再発防止策
+1. ディスク容量監視アラートを追加（使用率80%で警告）
+2. ログローテーションを自動化
+3. 週次でディスク容量をレビュー
+
+## タイムライン
+| 時刻 | イベント |
+|------|----------|
+| 14:30 | サービス停止 |
+| 14:35 | 自動アラート発報 |
+| 14:40 | 対応チーム招集 |
+| 14:50 | 原因特定 |
+| 15:00 | 応急処置開始 |
+| 15:30 | サービス復旧 |
+| 15:45 | 正常動作確認完了 |
+```
+
+---
+
+## セキュリティインシデント
+
+### データ漏洩時の対応
+
+#### 1. 被害範囲の特定
+
+```typescript
+/**
+ * 漏洩データの範囲を特定
+ */
+async function identifyDataBreach(incidentId: string): Promise<DataBreachReport> {
+  // 監査ログを確認
+  const suspiciousLogs = await db.auditLog.findMany({
+    where: {
+      timestamp: {
+        gte: new Date('2024-01-15T00:00:00Z'),
+        lte: new Date('2024-01-15T23:59:59Z'),
+      },
+      action: 'export',
+    },
+    orderBy: { timestamp: 'desc' },
+  });
+
+  // 影響を受けたユーザーを特定
+  const affectedUserIds = suspiciousLogs.map((log) => log.userId);
+  const affectedUsers = await db.user.findMany({
+    where: { id: { in: affectedUserIds } },
+  });
+
+  return {
+    incidentId,
+    affectedUserCount: affectedUsers.length,
+    affectedUsers: affectedUsers.map((u) => ({ id: u.id, email: u.email })),
+    dataTypes: ['name', 'email', 'phoneNumber'],
+    detectedAt: new Date(),
+  };
+}
+
+export { identifyDataBreach };
+```
+
+#### 2. 法令対応
+
+**個人情報保護法対応**（日本）:
+- 個人情報保護委員会への報告（72時間以内）
+- 本人への通知
+- 再発防止策の実施
+
+```typescript
+/**
+ * 個人情報保護委員会への報告
+ */
+async function reportToAuthority(breach: DataBreachReport): Promise<void> {
+  const report = {
+    incidentId: breach.incidentId,
+    detectedAt: breach.detectedAt,
+    reportedAt: new Date(),
+    affectedUserCount: breach.affectedUserCount,
+    dataTypes: breach.dataTypes,
+    cause: breach.cause,
+    measures: breach.measures,
+  };
+
+  // 報告書を生成
+  await generateBreachReport(report);
+
+  // 個人情報保護委員会に提出
+  logger.info('Breach report generated', { incidentId: breach.incidentId });
+}
+
+export { reportToAuthority };
+```
+
+#### 3. ユーザーへの通知
+
+```typescript
+/**
+ * データ漏洩をユーザーに通知
+ */
+async function notifyAffectedUsers(breach: DataBreachReport): Promise<void> {
+  for (const user of breach.affectedUsers) {
+    await sendEmail({
+      to: user.email,
+      subject: '【重要】個人情報漏洩に関するお知らせ',
+      body: `
+${user.name} 様
+
+平素より弊社サービスをご利用いただき、誠にありがとうございます。
+
+この度、弊社システムにおいて個人情報の漏洩が発生いたしました。
+お客様の個人情報が漏洩した可能性があり、深くお詫び申し上げます。
+
+■ 漏洩した可能性のある情報
+${breach.dataTypes.join(', ')}
+
+■ 経緯
+${breach.cause}
+
+■ 対応状況
+${breach.measures}
+
+■ 再発防止策
+今後このような事態が発生しないよう、以下の対策を実施いたします。
+- セキュリティ監視の強化
+- アクセス制御の見直し
+- 社員教育の徹底
+
+ご不明な点がございましたら、以下までお問い合わせください。
+
+お問い合わせ先: support@example.com
+
+改めて深くお詫び申し上げます。
+      `,
+    });
+  }
+}
+
+export { notifyAffectedUsers };
+```
+
+---
+
+## 連絡体制
+
+### エスカレーションフロー
+
+```
+┌─────────────┐
+│ 検知・報告 │
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐
+│ 一次対応者  │ ← 開発者、運用担当
+└──────┬──────┘
+       │ P1/P2の場合
+       ▼
+┌─────────────┐
+│ インシデント│ ← テックリード、マネージャー
+│ 対応責任者  │
+└──────┬──────┘
+       │ P1の場合
+       ▼
+┌─────────────┐
+│ 経営層      │ ← CTO、CEO
+└─────────────┘
+```
+
+### 連絡先リスト
+
+```typescript
+/**
+ * 緊急連絡先
+ */
+const EMERGENCY_CONTACTS = {
+  techLead: {
+    name: 'Tech Lead',
+    phone: '+81-90-xxxx-xxxx',
+    email: 'tech-lead@example.com',
+    slack: '@tech-lead',
+  },
+  manager: {
+    name: 'Manager',
+    phone: '+81-90-xxxx-xxxx',
+    email: 'manager@example.com',
+    slack: '@manager',
+  },
+  cto: {
+    name: 'CTO',
+    phone: '+81-90-xxxx-xxxx',
+    email: 'cto@example.com',
+    slack: '@cto',
+  },
+} as const;
+
+export { EMERGENCY_CONTACTS };
+```
+
+---
+
+## インシデント対応チェックリスト
+
+### 検知時
+
+- [ ] インシデントレベルを判定
+- [ ] インシデント記録を作成
+- [ ] 対応チームに通知
+
+### 対応中
+
+- [ ] 影響範囲を特定
+- [ ] ユーザーに告知（P1/P2）
+- [ ] 応急処置を実施
+- [ ] 根本原因を調査
+
+### 復旧後
+
+- [ ] 正常動作を確認
+- [ ] ユーザーに復旧を告知
+- [ ] インシデント報告書を作成
+- [ ] 再発防止策を実施
+- [ ] 振り返りミーティング
+
+---
+
+## 参考資料
+
+- [NIST Incident Response Guide](https://www.nist.gov/publications/computer-security-incident-handling-guide)
+- [個人情報保護委員会](https://www.ppc.go.jp/)

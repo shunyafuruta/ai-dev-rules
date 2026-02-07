@@ -1,0 +1,430 @@
+---
+description: デプロイメント戦略とCI/CD
+globs:
+alwaysApply: true
+---
+
+# デプロイメント戦略
+
+**目的**: 安全で迅速なデプロイメントを実現する
+
+---
+
+## 環境構成
+
+### 環境の種類
+
+| 環境 | 用途 | デプロイタイミング |
+|------|------|---------------------|
+| **Development** | 開発環境 | 各開発者のローカル |
+| **Staging** | 本番同等のテスト環境 | developブランチのマージ時 |
+| **Production** | 本番環境 | mainブランチのマージ時 |
+
+### 環境変数管理
+
+```bash
+# .env.development（開発環境）
+NODE_ENV=development
+DATABASE_URL="postgresql://user:pass@localhost:5432/app_dev"
+API_URL="http://localhost:3000"
+
+# .env.staging（ステージング環境）
+NODE_ENV=staging
+DATABASE_URL="postgresql://user:pass@staging-db:5432/app_staging"
+API_URL="https://staging.example.com"
+
+# .env.production（本番環境）
+NODE_ENV=production
+DATABASE_URL="postgresql://user:pass@prod-db:5432/app_prod"
+API_URL="https://api.example.com"
+```
+
+**重要**: 環境変数ファイルは`.gitignore`に追加し、GitHubシークレットで管理
+
+---
+
+## CI/CDパイプライン
+
+### GitHub Actions設定
+
+```yaml
+# .github/workflows/deploy.yml
+name: Deploy
+
+on:
+  push:
+    branches:
+      - develop  # Stagingへデプロイ
+      - main     # Productionへデプロイ
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run linter
+        run: npm run lint
+
+      - name: Run tests
+        run: npm run test:coverage
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage/coverage-final.json
+
+  deploy-staging:
+    if: github.ref == 'refs/heads/develop'
+    needs: test
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Deploy to Staging
+        run: |
+          # デプロイスクリプト
+          ./scripts/deploy-staging.sh
+
+  deploy-production:
+    if: github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Deploy to Production
+        run: |
+          # デプロイスクリプト
+          ./scripts/deploy-production.sh
+
+      - name: Notify deployment
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: 'Production deployment completed'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+```
+
+---
+
+## デプロイ前チェックリスト
+
+### 必須チェック項目
+
+- [ ] **全てのテストがパス**
+  ```bash
+  npm run test
+  npm run test:e2e
+  ```
+
+- [ ] **ビルドが成功**
+  ```bash
+  npm run build
+  ```
+
+- [ ] **Lintエラーがない**
+  ```bash
+  npm run lint
+  ```
+
+- [ ] **データベースマイグレーションを確認**
+  ```bash
+  npx prisma migrate status
+  ```
+
+- [ ] **環境変数が設定済み**
+  - 本番環境の環境変数を確認
+  - シークレットが正しく設定されているか
+
+- [ ] **依存関係の脆弱性チェック**
+  ```bash
+  npm audit
+  npm audit fix
+  ```
+
+- [ ] **バックアップを取得**
+  - データベースバックアップ
+  - 設定ファイルバックアップ
+
+---
+
+## ゼロダウンタイムデプロイ
+
+### ブルーグリーンデプロイメント
+
+```bash
+#!/bin/bash
+# scripts/blue-green-deploy.sh
+
+# 1. 新しいバージョン（Green）をデプロイ
+echo "Deploying new version (Green)..."
+docker-compose -f docker-compose.green.yml up -d
+
+# 2. ヘルスチェック
+echo "Waiting for health check..."
+until $(curl --output /dev/null --silent --head --fail http://localhost:3001/health); do
+  printf '.'
+  sleep 5
+done
+
+# 3. トラフィックを新バージョンに切り替え
+echo "Switching traffic to Green..."
+# ロードバランサーの設定を変更
+# (nginx, HAProxy, ALBなど)
+
+# 4. 旧バージョン（Blue）を停止
+echo "Stopping old version (Blue)..."
+docker-compose -f docker-compose.blue.yml down
+
+echo "Deployment completed successfully!"
+```
+
+### ローリングデプロイメント（Kubernetes）
+
+```yaml
+# k8s/deployment.yml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1        # 同時に増やせるPod数
+      maxUnavailable: 0  # 同時に停止できるPod数（0=ゼロダウンタイム）
+  template:
+    metadata:
+      labels:
+        app: app
+    spec:
+      containers:
+      - name: app
+        image: app:latest
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 3
+```
+
+---
+
+## データベースマイグレーション
+
+### 安全なマイグレーション手順
+
+```bash
+#!/bin/bash
+# scripts/migrate-database.sh
+
+# 1. バックアップを取得
+echo "Creating database backup..."
+pg_dump -h $DB_HOST -U $DB_USER $DB_NAME > backup_$(date +%Y%m%d_%H%M%S).sql
+
+# 2. マイグレーションをドライラン
+echo "Running migration dry-run..."
+npx prisma migrate deploy --preview-feature
+
+# 3. マイグレーションを実行
+echo "Running migration..."
+npx prisma migrate deploy
+
+# 4. マイグレーション結果を確認
+echo "Verifying migration..."
+npx prisma migrate status
+
+echo "Migration completed successfully!"
+```
+
+### マイグレーション失敗時のロールバック
+
+```bash
+#!/bin/bash
+# scripts/rollback-database.sh
+
+# 最新のバックアップからリストア
+echo "Restoring database from backup..."
+psql -h $DB_HOST -U $DB_USER $DB_NAME < backup_latest.sql
+
+echo "Rollback completed!"
+```
+
+---
+
+## ロールバック手順
+
+### アプリケーションのロールバック
+
+```bash
+#!/bin/bash
+# scripts/rollback.sh
+
+# 1. 前バージョンのDockerイメージを取得
+PREVIOUS_VERSION=$(git rev-parse HEAD~1)
+echo "Rolling back to version: $PREVIOUS_VERSION"
+
+# 2. 前バージョンをデプロイ
+docker pull app:$PREVIOUS_VERSION
+docker-compose down
+docker-compose up -d
+
+# 3. ヘルスチェック
+until $(curl --output /dev/null --silent --head --fail http://localhost:3000/health); do
+  printf '.'
+  sleep 5
+done
+
+echo "Rollback completed successfully!"
+```
+
+---
+
+## デプロイメント通知
+
+### Slack通知
+
+```typescript
+/**
+ * デプロイメント通知をSlackに送信
+ */
+async function notifyDeployment(
+  environment: 'staging' | 'production',
+  version: string,
+  status: 'started' | 'success' | 'failed'
+): Promise<void> {
+  const webhookUrl = process.env.SLACK_WEBHOOK_URL;
+
+  if (!webhookUrl) {
+    return;
+  }
+
+  const color = status === 'success' ? 'good' : status === 'failed' ? 'danger' : 'warning';
+  const emoji = status === 'success' ? ':white_check_mark:' : status === 'failed' ? ':x:' : ':rocket:';
+
+  const message = {
+    attachments: [
+      {
+        color,
+        title: `${emoji} Deployment ${status}`,
+        fields: [
+          {
+            title: 'Environment',
+            value: environment,
+            short: true,
+          },
+          {
+            title: 'Version',
+            value: version,
+            short: true,
+          },
+          {
+            title: 'Time',
+            value: new Date().toISOString(),
+            short: false,
+          },
+        ],
+      },
+    ],
+  };
+
+  await fetch(webhookUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(message),
+  });
+}
+
+export { notifyDeployment };
+```
+
+---
+
+## セキュリティ対策
+
+### デプロイ時のセキュリティチェック
+
+```yaml
+# .github/workflows/security.yml
+name: Security Check
+
+on:
+  pull_request:
+  push:
+    branches: [develop, main]
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Run npm audit
+        run: npm audit --audit-level=high
+
+      - name: Run Snyk security scan
+        uses: snyk/actions/node@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: Scan for secrets
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+```
+
+---
+
+## デプロイメントチェックリスト
+
+### デプロイ前
+
+- [ ] テストが全てパス
+- [ ] ビルドが成功
+- [ ] データベースバックアップ取得
+- [ ] マイグレーションスクリプト確認
+- [ ] 環境変数確認
+- [ ] ロールバック手順確認
+
+### デプロイ中
+
+- [ ] デプロイスクリプト実行
+- [ ] マイグレーション実行
+- [ ] ヘルスチェック確認
+- [ ] 監視ダッシュボード確認
+
+### デプロイ後
+
+- [ ] 主要機能の動作確認
+- [ ] エラーログ確認
+- [ ] パフォーマンスメトリクス確認
+- [ ] ユーザー影響確認
+- [ ] Slack通知送信
+
+---
+
+## 参考資料
+
+- [GitHub Actions Documentation](https://docs.github.com/actions)
+- [Docker Documentation](https://docs.docker.com/)
+- [Kubernetes Documentation](https://kubernetes.io/docs/)

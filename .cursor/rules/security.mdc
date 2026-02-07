@@ -1,0 +1,848 @@
+---
+description: セキュリティガイドライン（病院・銀行・官公庁レベル対応）
+globs:
+alwaysApply: true
+---
+
+# セキュリティガイドライン
+
+**対象**: 病院、銀行、官公庁など高セキュリティ要求システム
+
+このガイドラインは、医療、金融、行政システムで求められるセキュリティ基準に準拠します。
+
+---
+
+## セキュリティポリシー
+
+### セキュリティファースト原則
+
+**すべての開発においてセキュリティを最優先事項とする**
+
+1. ✅ 機能実装前にセキュリティリスクを評価
+2. ✅ セキュアコーディング規約を厳守
+3. ✅ 定期的な脆弱性診断の実施
+4. ✅ インシデント対応計画の整備
+
+---
+
+## OWASP Top 10 対策
+
+### 1. 認証の破れ（Broken Authentication）
+
+#### 多要素認証（MFA）の必須化
+
+**重要システムでは必ずMFAを実装**
+
+```typescript
+/**
+ * MFA対応のログイン処理
+ *
+ * @param email - メールアドレス
+ * @param password - パスワード
+ * @param mfaCode - MFA認証コード（6桁）
+ * @returns 認証トークン
+ * @throws {AuthenticationError} 認証失敗時
+ */
+async function loginWithMFA(
+  email: string,
+  password: string,
+  mfaCode: string
+): Promise<{ token: string; refreshToken: string }> {
+  // 早期リターン: 入力検証
+  if (!email || !password || !mfaCode) {
+    throw new ValidationError('必須項目が入力されていません');
+  }
+
+  // パスワード検証
+  const user = await db.user.findUnique({ where: { email } });
+  if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
+    throw new AuthenticationError('メールアドレスまたはパスワードが正しくありません');
+  }
+
+  // MFA検証
+  const isValidMFA = await verifyTOTP(user.mfaSecret, mfaCode);
+  if (!isValidMFA) {
+    throw new AuthenticationError('認証コードが正しくありません');
+  }
+
+  // トークン生成
+  const token = generateJWT(user.id);
+  const refreshToken = generateRefreshToken(user.id);
+
+  // ログイン履歴を記録（監査ログ）
+  await db.loginHistory.create({
+    data: {
+      userId: user.id,
+      ipAddress: getClientIP(),
+      userAgent: getUserAgent(),
+      loginAt: new Date(),
+      status: 'success',
+    },
+  });
+
+  return { token, refreshToken };
+}
+
+export { loginWithMFA };
+```
+
+#### パスワードポリシー
+
+**厳格なパスワード要件を設定**
+
+```typescript
+import { z } from 'zod';
+
+// パスワード要件定数
+const PASSWORD_MIN_LENGTH = 12; // 最低12文字
+const PASSWORD_MAX_LENGTH = 128;
+const PASSWORD_REQUIRE_UPPERCASE = true;
+const PASSWORD_REQUIRE_LOWERCASE = true;
+const PASSWORD_REQUIRE_DIGIT = true;
+const PASSWORD_REQUIRE_SPECIAL_CHAR = true;
+
+/**
+ * パスワードバリデーションスキーマ
+ */
+const PasswordSchema = z
+  .string()
+  .min(PASSWORD_MIN_LENGTH, `パスワードは${PASSWORD_MIN_LENGTH}文字以上で入力してください`)
+  .max(PASSWORD_MAX_LENGTH, `パスワードは${PASSWORD_MAX_LENGTH}文字以内で入力してください`)
+  .regex(/[A-Z]/, '大文字を1文字以上含めてください')
+  .regex(/[a-z]/, '小文字を1文字以上含めてください')
+  .regex(/[0-9]/, '数字を1文字以上含めてください')
+  .regex(/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/, '記号を1文字以上含めてください');
+
+export { PasswordSchema };
+```
+
+#### セッション管理
+
+**セキュアなセッション管理**
+
+```typescript
+// セッション設定定数
+const SESSION_TIMEOUT_MINUTES = 30; // 30分でタイムアウト
+const SESSION_ABSOLUTE_TIMEOUT_HOURS = 8; // 絶対タイムアウト8時間
+const SESSION_REFRESH_INTERVAL_MINUTES = 15; // 15分ごとにリフレッシュ
+
+/**
+ * セッションの検証と更新
+ *
+ * @param sessionId - セッションID
+ * @returns セッション情報
+ * @throws {SessionExpiredError} セッションが期限切れの場合
+ */
+async function validateAndRefreshSession(sessionId: string) {
+  const session = await db.session.findUnique({ where: { id: sessionId } });
+
+  // 早期リターン: セッションが存在しない
+  if (!session) {
+    throw new SessionExpiredError('セッションが見つかりません');
+  }
+
+  const now = new Date();
+  const lastActivityMs = now.getTime() - session.lastActivityAt.getTime();
+  const createdMs = now.getTime() - session.createdAt.getTime();
+
+  // 非アクティブタイムアウトチェック（30分）
+  if (lastActivityMs > SESSION_TIMEOUT_MINUTES * 60 * 1000) {
+    await db.session.delete({ where: { id: sessionId } });
+    throw new SessionExpiredError('セッションがタイムアウトしました');
+  }
+
+  // 絶対タイムアウトチェック（8時間）
+  if (createdMs > SESSION_ABSOLUTE_TIMEOUT_HOURS * 60 * 60 * 1000) {
+    await db.session.delete({ where: { id: sessionId } });
+    throw new SessionExpiredError('セッションの有効期限が切れました。再ログインしてください');
+  }
+
+  // セッションをリフレッシュ
+  const updatedSession = await db.session.update({
+    where: { id: sessionId },
+    data: { lastActivityAt: now },
+  });
+
+  return updatedSession;
+}
+
+export { validateAndRefreshSession };
+```
+
+### 2. SQLインジェクション対策
+
+**Prismaを使用した型安全なクエリ**
+
+```typescript
+// ❌ 危険: 生SQLの直接実行（絶対禁止）
+const query = `SELECT * FROM users WHERE email = '${userInput}'`;
+await db.$queryRaw(query);
+
+// ✅ 安全: Prismaの型安全なクエリ
+const user = await db.user.findUnique({
+  where: { email: userInput },
+});
+
+// ✅ 安全: パラメータ化されたクエリ（生SQLが必要な場合）
+import { Prisma } from '@prisma/client';
+
+const users = await db.$queryRaw<User[]>(
+  Prisma.sql`SELECT * FROM users WHERE email = ${userInput}`
+);
+```
+
+### 3. XSS（クロスサイトスクリプティング）対策
+
+**HTMLエスケープとサニタイゼーション**
+
+```typescript
+// ❌ 危険: ユーザー入力を直接HTMLに挿入
+<div dangerouslySetInnerHTML={{ __html: userInput }} />
+
+// ✅ 安全: プレーンテキストとして表示
+<div>{userInput}</div>
+
+// ✅ 安全: サニタイズしてからHTMLとして表示（必要な場合のみ）
+import DOMPurify from 'dompurify';
+
+const sanitizedHTML = DOMPurify.sanitize(userInput, {
+  ALLOWED_TAGS: ['b', 'i', 'em', 'strong', 'a'],
+  ALLOWED_ATTR: ['href'],
+});
+
+<div dangerouslySetInnerHTML={{ __html: sanitizedHTML }} />
+```
+
+**Content Security Policy（CSP）の設定**
+
+```typescript
+// apps/api/src/middleware/security.ts
+import helmet from 'helmet';
+
+/**
+ * セキュリティヘッダーを設定するミドルウェア
+ */
+const securityHeaders = helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"], // 本番では'unsafe-inline'を削除
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", 'data:', 'https:'],
+      connectSrc: ["'self'"],
+      fontSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      mediaSrc: ["'self'"],
+      frameSrc: ["'none'"],
+    },
+  },
+  hsts: {
+    maxAge: 31536000, // 1年
+    includeSubDomains: true,
+    preload: true,
+  },
+  frameguard: {
+    action: 'deny', // クリックジャッキング対策
+  },
+  noSniff: true, // MIMEスニッフィング対策
+  xssFilter: true, // XSSフィルター有効化
+});
+
+export { securityHeaders };
+```
+
+### 4. CSRF（クロスサイトリクエストフォージェリ）対策
+
+**CSRFトークンの実装**
+
+```typescript
+import csrf from 'csurf';
+import type { Request, Response, NextFunction } from 'express';
+
+// CSRFトークン検証ミドルウェア
+const csrfProtection = csrf({
+  cookie: {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+  },
+});
+
+/**
+ * CSRFトークンを生成するエンドポイント
+ */
+function getCsrfToken(req: Request, res: Response): void {
+  res.json({ csrfToken: req.csrfToken() });
+}
+
+/**
+ * 状態変更APIエンドポイント（POST/PUT/DELETE）にCSRF保護を適用
+ */
+app.post('/api/contracts', csrfProtection, createContract);
+app.put('/api/contracts/:id', csrfProtection, updateContract);
+app.delete('/api/contracts/:id', csrfProtection, deleteContract);
+
+export { csrfProtection, getCsrfToken };
+```
+
+### 5. 機密情報の露出対策
+
+**機密情報の適切な管理**
+
+```typescript
+// ❌ 危険: パスワードハッシュを含めて返す
+const user = await db.user.findUnique({ where: { id: userId } });
+res.json(user); // passwordHash, apiKey, mfaSecret などが露出
+
+// ✅ 安全: 必要な情報のみを返す
+const user = await db.user.findUnique({
+  where: { id: userId },
+  select: {
+    id: true,
+    name: true,
+    email: true,
+    role: true,
+    createdAt: true,
+    // passwordHash, apiKey, mfaSecret は除外
+  },
+});
+res.json(user);
+```
+
+**環境変数の管理**
+
+```bash
+# ❌ 危険: 機密情報をコードに直接記述
+const apiKey = 'sk-1234567890abcdef';
+
+# ✅ 安全: 環境変数で管理
+# .env（.gitignoreに追加必須）
+DATABASE_URL="postgresql://user:password@localhost:5432/db"
+JWT_SECRET="your-secret-key-here"
+ENCRYPTION_KEY="your-encryption-key-here"
+```
+
+**機密情報の暗号化**
+
+```typescript
+import crypto from 'crypto';
+
+// 暗号化キー（環境変数から取得）
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY;
+if (!ENCRYPTION_KEY || ENCRYPTION_KEY.length !== 32) {
+  throw new Error('ENCRYPTION_KEY must be 32 characters');
+}
+
+const ENCRYPTION_ALGORITHM = 'aes-256-gcm';
+
+/**
+ * データを暗号化する
+ *
+ * @param plaintext - 平文データ
+ * @returns 暗号化されたデータ（Base64エンコード）
+ */
+function encrypt(plaintext: string): string {
+  const iv = crypto.randomBytes(16); // 初期化ベクトル
+  const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM, ENCRYPTION_KEY, iv);
+
+  const encrypted = Buffer.concat([
+    cipher.update(plaintext, 'utf8'),
+    cipher.final(),
+  ]);
+
+  const authTag = cipher.getAuthTag();
+
+  // IV + 認証タグ + 暗号文 をBase64エンコード
+  const result = Buffer.concat([iv, authTag, encrypted]);
+  return result.toString('base64');
+}
+
+/**
+ * データを復号化する
+ *
+ * @param ciphertext - 暗号化されたデータ（Base64エンコード）
+ * @returns 復号化された平文データ
+ */
+function decrypt(ciphertext: string): string {
+  const data = Buffer.from(ciphertext, 'base64');
+
+  const iv = data.subarray(0, 16);
+  const authTag = data.subarray(16, 32);
+  const encrypted = data.subarray(32);
+
+  const decipher = crypto.createDecipheriv(ENCRYPTION_ALGORITHM, ENCRYPTION_KEY, iv);
+  decipher.setAuthTag(authTag);
+
+  const decrypted = Buffer.concat([
+    decipher.update(encrypted),
+    decipher.final(),
+  ]);
+
+  return decrypted.toString('utf8');
+}
+
+export { encrypt, decrypt };
+```
+
+### 6. アクセス制御（RBAC: Role-Based Access Control）
+
+**ロールベースアクセス制御の実装**
+
+```typescript
+// ロール定義
+type UserRole = 'admin' | 'manager' | 'staff' | 'readonly';
+
+// 権限マトリックス
+const PERMISSIONS = {
+  'contract:create': ['admin', 'manager'],
+  'contract:read': ['admin', 'manager', 'staff', 'readonly'],
+  'contract:update': ['admin', 'manager'],
+  'contract:delete': ['admin'],
+  'user:create': ['admin'],
+  'user:read': ['admin', 'manager'],
+  'user:update': ['admin'],
+  'user:delete': ['admin'],
+} as const;
+
+/**
+ * 権限チェック
+ *
+ * @param userRole - ユーザーのロール
+ * @param permission - チェックする権限
+ * @returns 権限があればtrue
+ */
+function hasPermission(userRole: UserRole, permission: keyof typeof PERMISSIONS): boolean {
+  return PERMISSIONS[permission].includes(userRole);
+}
+
+/**
+ * 権限チェックミドルウェア
+ *
+ * @param permission - 必要な権限
+ */
+function requirePermission(permission: keyof typeof PERMISSIONS) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const { user } = req;
+
+    // 早期リターン: 認証されていない
+    if (!user) {
+      res.status(401).json({ error: '認証が必要です' });
+      return;
+    }
+
+    // 早期リターン: 権限がない
+    if (!hasPermission(user.role, permission)) {
+      res.status(403).json({ error: 'この操作を実行する権限がありません' });
+      return;
+    }
+
+    next();
+  };
+}
+
+// 使用例
+app.post('/api/contracts', requirePermission('contract:create'), createContract);
+app.delete('/api/contracts/:id', requirePermission('contract:delete'), deleteContract);
+
+export { hasPermission, requirePermission };
+```
+
+### 7. ログと監視（監査ログ）
+
+**改ざん検知可能な監査ログの実装**
+
+```typescript
+/**
+ * 監査ログを記録する
+ *
+ * @param event - イベント種別
+ * @param userId - 実行ユーザーID
+ * @param resource - 対象リソース
+ * @param action - 実行アクション
+ * @param details - 詳細情報
+ */
+async function logAudit(
+  event: string,
+  userId: string,
+  resource: string,
+  action: string,
+  details: Record<string, unknown>
+): Promise<void> {
+  const timestamp = new Date();
+  const ipAddress = getClientIP();
+  const userAgent = getUserAgent();
+
+  // ログデータ
+  const logData = {
+    event,
+    userId,
+    resource,
+    action,
+    details: JSON.stringify(details),
+    ipAddress,
+    userAgent,
+    timestamp,
+  };
+
+  // ハッシュ値を計算（改ざん検知用）
+  const hash = crypto
+    .createHash('sha256')
+    .update(JSON.stringify(logData))
+    .digest('hex');
+
+  // 監査ログを保存
+  await db.auditLog.create({
+    data: {
+      ...logData,
+      hash,
+    },
+  });
+}
+
+// 使用例
+await logAudit(
+  'CONTRACT_CREATED',
+  user.id,
+  'contract',
+  'create',
+  { contractId: contract.id, studentId: contract.studentId }
+);
+
+await logAudit(
+  'USER_DELETED',
+  admin.id,
+  'user',
+  'delete',
+  { deletedUserId: targetUser.id, reason: 'account_closure' }
+);
+
+export { logAudit };
+```
+
+### 8. レート制限（DoS/DDoS対策）
+
+**APIレート制限の実装**
+
+```typescript
+import rateLimit from 'express-rate-limit';
+
+// ログインエンドポイントのレート制限（厳格）
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15分
+  max: 5, // 最大5回まで
+  message: 'ログイン試行回数が上限に達しました。15分後に再試行してください。',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// 一般APIのレート制限
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1分
+  max: 100, // 最大100リクエスト/分
+  message: 'リクエスト数が上限に達しました。しばらくしてから再試行してください。',
+});
+
+// 適用
+app.post('/api/auth/login', loginLimiter, login);
+app.use('/api/', apiLimiter);
+
+export { loginLimiter, apiLimiter };
+```
+
+### 9. 入力検証とサニタイゼーション
+
+**厳格な入力検証**
+
+```typescript
+import { z } from 'zod';
+import validator from 'validator';
+
+/**
+ * メールアドレスのバリデーション（厳格）
+ */
+const EmailSchema = z
+  .string()
+  .email('有効なメールアドレスを入力してください')
+  .max(255)
+  .refine((email) => validator.isEmail(email, { allow_utf8_local_part: false }), {
+    message: 'メールアドレスの形式が正しくありません',
+  });
+
+/**
+ * 電話番号のバリデーション（日本の電話番号形式）
+ */
+const PhoneNumberSchema = z
+  .string()
+  .regex(/^0\d{1,4}-?\d{1,4}-?\d{4}$/, '電話番号の形式が正しくありません')
+  .transform((val) => val.replace(/-/g, '')); // ハイフンを削除
+
+/**
+ * URLのバリデーション（ホワイトリスト方式）
+ */
+const ALLOWED_URL_DOMAINS = ['example.com', 'trusted-site.com'];
+
+const SafeUrlSchema = z
+  .string()
+  .url('有効なURLを入力してください')
+  .refine((url) => {
+    const { hostname } = new URL(url);
+    return ALLOWED_URL_DOMAINS.some((domain) => hostname.endsWith(domain));
+  }, {
+    message: '許可されていないドメインです',
+  });
+
+export { EmailSchema, PhoneNumberSchema, SafeUrlSchema };
+```
+
+### 10. 安全でない逆シリアル化対策
+
+**JSONのみを使用し、evalを禁止**
+
+```typescript
+// ❌ 危険: evalの使用（絶対禁止）
+const data = eval(userInput);
+
+// ❌ 危険: Function constructorの使用（絶対禁止）
+const fn = new Function('return ' + userInput);
+
+// ✅ 安全: JSON.parseのみ使用
+try {
+  const data = JSON.parse(userInput);
+} catch (error) {
+  throw new ValidationError('無効なJSON形式です');
+}
+```
+
+---
+
+## データ保護
+
+### 個人情報の取り扱い
+
+**個人情報保護法・GDPR準拠**
+
+```typescript
+/**
+ * 個人情報の種別
+ */
+type PersonalDataType = 'name' | 'email' | 'phone' | 'address' | 'medical' | 'financial';
+
+/**
+ * 個人情報を仮名化する
+ *
+ * @param data - 個人情報
+ * @param type - 情報種別
+ * @returns 仮名化されたデータ
+ */
+function pseudonymize(data: string, type: PersonalDataType): string {
+  switch (type) {
+    case 'email':
+      // example@domain.com → e***e@d***n.com
+      const [localPart, domain] = data.split('@');
+      const maskedLocal = localPart[0] + '***' + localPart[localPart.length - 1];
+      const [domainName, tld] = domain.split('.');
+      const maskedDomain = domainName[0] + '***' + domainName[domainName.length - 1];
+      return `${maskedLocal}@${maskedDomain}.${tld}`;
+
+    case 'phone':
+      // 090-1234-5678 → 090-****-5678
+      return data.replace(/(\d{3})-?\d{4}-?(\d{4})/, '$1-****-$2');
+
+    case 'name':
+      // 山田太郎 → 山田**
+      return data.substring(0, 2) + '**';
+
+    default:
+      return '***';
+  }
+}
+
+export { pseudonymize };
+```
+
+### データ保持・削除ポリシー
+
+**データライフサイクル管理**
+
+```typescript
+/**
+ * 個人情報の保持期間（日数）
+ */
+const DATA_RETENTION_DAYS = {
+  LOGIN_HISTORY: 90, // ログイン履歴: 90日
+  AUDIT_LOG: 365 * 7, // 監査ログ: 7年（法令対応）
+  DELETED_USER: 30, // 削除済みユーザー: 30日（復元猶予期間）
+  SESSION: 1, // セッション: 1日
+} as const;
+
+/**
+ * 保持期限切れのデータを削除する（定期実行）
+ */
+async function purgeExpiredData(): Promise<void> {
+  const now = new Date();
+
+  // ログイン履歴の削除
+  const loginHistoryCutoff = new Date(
+    now.getTime() - DATA_RETENTION_DAYS.LOGIN_HISTORY * 24 * 60 * 60 * 1000
+  );
+  await db.loginHistory.deleteMany({
+    where: { loginAt: { lt: loginHistoryCutoff } },
+  });
+
+  // 期限切れセッションの削除
+  const sessionCutoff = new Date(
+    now.getTime() - DATA_RETENTION_DAYS.SESSION * 24 * 60 * 60 * 1000
+  );
+  await db.session.deleteMany({
+    where: { lastActivityAt: { lt: sessionCutoff } },
+  });
+
+  // 削除済みユーザーの完全削除
+  const deletedUserCutoff = new Date(
+    now.getTime() - DATA_RETENTION_DAYS.DELETED_USER * 24 * 60 * 60 * 1000
+  );
+  await db.user.deleteMany({
+    where: {
+      deletedAt: { not: null, lt: deletedUserCutoff },
+    },
+  });
+
+  console.log('期限切れデータの削除が完了しました');
+}
+
+export { purgeExpiredData };
+```
+
+---
+
+## 通信セキュリティ
+
+### HTTPS必須
+
+**本番環境ではHTTPS通信のみ許可**
+
+```typescript
+/**
+ * HTTPS強制リダイレクトミドルウェア
+ */
+function enforceHTTPS(req: Request, res: Response, next: NextFunction): void {
+  // 本番環境でHTTPの場合はHTTPSにリダイレクト
+  if (process.env.NODE_ENV === 'production' && req.headers['x-forwarded-proto'] !== 'https') {
+    res.redirect(301, `https://${req.headers.host}${req.url}`);
+    return;
+  }
+
+  next();
+}
+
+// 全エンドポイントに適用
+app.use(enforceHTTPS);
+
+export { enforceHTTPS };
+```
+
+### CORS設定
+
+**適切なCORS設定**
+
+```typescript
+import cors from 'cors';
+
+// 許可するオリジン（ホワイトリスト方式）
+const ALLOWED_ORIGINS = [
+  'https://example.com',
+  'https://app.example.com',
+  ...(process.env.NODE_ENV === 'development' ? ['http://localhost:5173'] : []),
+];
+
+const corsOptions = {
+  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    // オリジンが未定義（同一オリジン）またはホワイトリストに含まれる場合は許可
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('CORS policy violation'));
+    }
+  },
+  credentials: true, // Cookieを許可
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token'],
+};
+
+app.use(cors(corsOptions));
+
+export { corsOptions };
+```
+
+---
+
+## セキュリティテスト
+
+### 脆弱性診断
+
+**定期的な脆弱性診断の実施**
+
+```bash
+# 依存関係の脆弱性チェック
+npm audit
+
+# 修正可能な脆弱性を自動修正
+npm audit fix
+
+# Snykを使用した高度な脆弱性スキャン
+npx snyk test
+npx snyk monitor
+```
+
+### ペネトレーションテスト
+
+**年1回以上のペネトレーションテストを実施**
+
+- OWASP ZAP
+- Burp Suite
+- 専門業者による診断
+
+---
+
+## セキュリティチェックリスト
+
+### 実装前チェック
+
+- [ ] セキュリティリスク評価を実施
+- [ ] 個人情報の取り扱いを確認
+- [ ] 認証・認可フローを設計
+- [ ] 入力検証ルールを定義
+
+### 実装中チェック
+
+- [ ] Zodによる入力検証を実装
+- [ ] SQLインジェクション対策を実施
+- [ ] XSS対策を実施
+- [ ] CSRF対策を実施
+- [ ] 機密情報を暗号化
+- [ ] 監査ログを記録
+
+### デプロイ前チェック
+
+- [ ] 環境変数が適切に設定されている
+- [ ] HTTPS通信が有効
+- [ ] セキュリティヘッダーが設定されている
+- [ ] レート制限が有効
+- [ ] 脆弱性診断を実施
+- [ ] ペネトレーションテストを実施
+
+### 運用中チェック
+
+- [ ] 監査ログを定期的に確認
+- [ ] アクセス権限を定期的に見直し
+- [ ] 依存関係の脆弱性を監視
+- [ ] インシデント対応訓練を実施
+
+---
+
+## 参考資料
+
+- [OWASP Top 10](https://owasp.org/www-project-top-ten/)
+- [NIST Cybersecurity Framework](https://www.nist.gov/cyberframework)
+- [CIS Controls](https://www.cisecurity.org/controls)
+- [個人情報保護委員会](https://www.ppc.go.jp/)

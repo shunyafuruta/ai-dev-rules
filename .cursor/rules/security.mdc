@@ -25,7 +25,15 @@ alwaysApply: true
 
 ---
 
-## OWASP Top 10 対策
+## OWASP Top 10:2025 対策
+
+**最終更新**: 2026年2月（OWASP Top 10:2025に準拠）
+
+**主な変更点（2021→2025）:**
+- 🆕 **A03: Software Supply Chain Failures**（新規カテゴリ）
+- 🆕 **A10: Mishandling of Exceptional Conditions**（新規カテゴリ）
+- 📈 **A02: Security Misconfiguration**（#5→#2にランクアップ）
+- 🔀 **SSRF → A01: Broken Access Controlに統合**
 
 ### 1. 認証の破れ（Broken Authentication）
 
@@ -840,9 +848,247 @@ npx snyk monitor
 
 ---
 
+## OWASP Top 10:2025 新規カテゴリ
+
+### A03:2025 - Software Supply Chain Failures（ソフトウェアサプライチェーンの脆弱性）
+
+**概要**: 依存関係、ビルドシステム、配布インフラを含むソフトウェアエコシステム全体のセキュリティリスク。
+
+**対策**:
+
+#### 1. SBOM（Software Bill of Materials）の管理
+
+```bash
+# 依存関係の一覧を生成
+npm list --all > sbom.txt
+
+# package-lock.jsonを必ずコミット
+git add package-lock.json
+```
+
+#### 2. 依存関係の脆弱性スキャン
+
+```bash
+# npm auditで脆弱性チェック
+npm audit
+
+# 自動修正（可能な場合）
+npm audit fix
+
+# Snykを使用した高度なスキャン
+npx snyk test
+npx snyk monitor
+```
+
+#### 3. パッケージの署名検証
+
+```typescript
+/**
+ * パッケージの整合性検証
+ * package-lock.jsonのintegrityフィールドでSHA-512ハッシュを検証
+ */
+// npm installは自動的にintegrityを検証します
+// package-lock.jsonを必ずバージョン管理に含める
+```
+
+#### 4. Dependabotの活用
+
+```yaml
+# .github/dependabot.yml
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+```
+
+#### 5. プライベートレジストリの使用
+
+```bash
+# .npmrcでプライベートレジストリを指定
+registry=https://your-private-registry.com/
+```
+
+---
+
+### A10:2025 - Mishandling of Exceptional Conditions（例外状態の不適切な処理）
+
+**概要**: エラーハンドリング、論理エラー、Fail-open（セキュリティ失敗時にオープン状態になる）などの問題。
+
+**対策**:
+
+#### 1. Fail-Closeの原則
+
+```typescript
+// ❌ 悪い例: Fail-open（エラー時に認証をスキップ）
+function checkPermission(userId: string, resource: string): boolean {
+  try {
+    const hasPermission = authService.checkPermission(userId, resource);
+    return hasPermission;
+  } catch (error) {
+    // エラー時にtrueを返す = Fail-open
+    console.error('Permission check failed:', error);
+    return true; // 危険！
+  }
+}
+
+// ✅ 良い例: Fail-close（エラー時にアクセス拒否）
+function checkPermission(userId: string, resource: string): boolean {
+  try {
+    const hasPermission = authService.checkPermission(userId, resource);
+    return hasPermission;
+  } catch (error) {
+    // エラー時はfalseを返す = Fail-close
+    console.error('Permission check failed:', error);
+    logSecurityEvent('PERMISSION_CHECK_FAILED', { userId, resource, error });
+    return false; // 安全
+  }
+}
+```
+
+#### 2. エラー情報の適切な開示
+
+```typescript
+// ❌ 悪い例: 詳細なエラー情報を公開
+app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+  res.status(500).json({
+    error: err.message,
+    stack: err.stack, // スタックトレースを公開 = 危険
+    query: req.query,
+  });
+});
+
+// ✅ 良い例: 最小限のエラー情報のみ公開
+app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+  // サーバー側でエラーをログ
+  console.error('Server error:', err);
+  logErrorToMonitoring(err, { userId: req.user?.id, path: req.path });
+
+  // クライアントには最小限の情報のみ
+  res.status(500).json({
+    error: 'サーバーエラーが発生しました。しばらくしてから再試行してください。',
+    errorId: generateErrorId(), // 問い合わせ用のID
+  });
+});
+```
+
+#### 3. タイムアウトの適切な設定
+
+```typescript
+// ✅ すべての外部API呼び出しにタイムアウトを設定
+const API_TIMEOUT_MS = 5000;
+
+async function fetchExternalData(url: string): Promise<Data> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      throw new ApiError(`API request failed: ${response.statusText}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    clearTimeout(timeoutId);
+
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new TimeoutError('API request timed out');
+    }
+
+    throw error;
+  }
+}
+```
+
+#### 4. 境界値チェック
+
+```typescript
+/**
+ * ページネーションの境界値チェック
+ */
+const PAGINATION = {
+  MIN_PAGE_SIZE: 1,
+  MAX_PAGE_SIZE: 100,
+  DEFAULT_PAGE_SIZE: 20,
+} as const;
+
+function validatePagination(page: number, pageSize: number) {
+  // 早期リターン: ページ番号が無効
+  if (page < 1) {
+    throw new ValidationError('ページ番号は1以上である必要があります');
+  }
+
+  // 早期リターン: ページサイズが範囲外
+  if (pageSize < PAGINATION.MIN_PAGE_SIZE || pageSize > PAGINATION.MAX_PAGE_SIZE) {
+    throw new ValidationError(
+      `ページサイズは${PAGINATION.MIN_PAGE_SIZE}〜${PAGINATION.MAX_PAGE_SIZE}の範囲である必要があります`
+    );
+  }
+
+  return { page, pageSize };
+}
+```
+
+---
+
+## A02:2025 - Security Misconfiguration（セキュリティ設定ミス）
+
+**ランクアップ**: #5（2021）→ #2（2025）
+
+**対策強化**:
+
+#### 1. クラウドセキュリティベストプラクティス
+
+```typescript
+// ✅ 環境変数の検証を起動時に実施
+const REQUIRED_ENV_VARS = [
+  'DATABASE_URL',
+  'JWT_SECRET',
+  'ENCRYPTION_KEY',
+  'NODE_ENV',
+] as const;
+
+function validateEnvironment(): void {
+  const missing = REQUIRED_ENV_VARS.filter((key) => !process.env[key]);
+
+  if (missing.length > 0) {
+    throw new Error(`必須の環境変数が設定されていません: ${missing.join(', ')}`);
+  }
+
+  // JWTシークレットの長さチェック
+  if (process.env.JWT_SECRET!.length < 32) {
+    throw new Error('JWT_SECRETは32文字以上である必要があります');
+  }
+}
+
+// アプリケーション起動時に実行
+validateEnvironment();
+```
+
+#### 2. デフォルト設定の強化
+
+```typescript
+// ✅ セキュアなデフォルト設定
+const SECURITY_DEFAULTS = {
+  SESSION_TIMEOUT_MINUTES: 30,
+  MAX_LOGIN_ATTEMPTS: 5,
+  PASSWORD_MIN_LENGTH: 12,
+  MFA_ENABLED: true,
+  HTTPS_ONLY: process.env.NODE_ENV === 'production',
+} as const;
+```
+
+---
+
 ## 参考資料
 
-- [OWASP Top 10](https://owasp.org/www-project-top-ten/)
+- [OWASP Top 10:2025](https://owasp.org/Top10/2025/)
+- [OWASP Top 10 (従来版)](https://owasp.org/www-project-top-ten/)
 - [NIST Cybersecurity Framework](https://www.nist.gov/cyberframework)
 - [CIS Controls](https://www.cisecurity.org/controls)
 - [個人情報保護委員会](https://www.ppc.go.jp/)

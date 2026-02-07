@@ -10,7 +10,40 @@ alwaysApply: true
 
 このセクションはプロジェクトに応じてカスタマイズしてください。
 
-**例: フルスタックWebアプリケーション**
+**推奨バージョン（2026年2月時点 - 安定性重視）**
+
+### 実行環境
+- **Node.js**: 22.x LTS（推奨）
+  - Node.js 20.xは2026年4月でEOL（End-of-Life）
+  - Node.js 22.xは2027年4月までサポート
+
+### フロントエンド
+- **React**: 19.2.4（セキュリティパッチ適用版）
+- **TypeScript**: 5.8以上
+- **ビルドツール**: Vite 6.x（Vite 7は様子見推奨）
+- **スタイリング**: Tailwind CSS
+- **状態管理**: TanStack Query v4/v5, Context API + useReducer
+- **フォーム**: React Hook Form + Zod
+- **ルーティング**: React Router
+
+### バックエンド
+- **フレームワーク**: Express + TypeScript
+- **データベース**: MySQL 8.0 / PostgreSQL 14+
+- **ORM**: Prisma 5.x（Prisma 6は様子見推奨）
+- **認証**: JWT + bcrypt
+
+### テスト
+- **ユニット・統合テスト**: Vitest
+- **APIテスト**: Supertest
+- **E2Eテスト**: Playwright
+
+### インフラ
+- **クラウド**: Google Cloud / AWS / Azure
+- **CI/CD**: GitHub Actions
+
+---
+
+**例: フルスタックWebアプリケーション（従来の記法）**
 - **フロントエンド**: React 19.2, TypeScript, Vite
 - **スタイリング**: Tailwind CSS
 - **状態管理**: TanStack Query, Context API + useReducer

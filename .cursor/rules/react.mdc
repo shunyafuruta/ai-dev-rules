@@ -6,9 +6,14 @@ alwaysApply: true
 
 # Reactコンポーネント規約
 
-## 重要: React 19.2とReact Compilerについて
+## 重要: React 19.2.4とReact Compilerについて
 
-**このプロジェクトはReact 19.2とReact Compilerを使用しています。**
+**このプロジェクトはReact 19.2.4とReact Compilerを使用しています。**
+
+**バージョン情報（2026年2月時点）:**
+- **推奨バージョン**: React 19.2.4以上
+- **セキュリティ**: 19.2.4はServer ComponentsのDoS脆弱性対策を含む
+- **安定性**: 19.2系は十分に安定しており、本番環境での使用を推奨
 
 ### React Compilerによる自動最適化
 

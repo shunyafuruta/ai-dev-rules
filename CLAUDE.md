@@ -14,15 +14,34 @@
 
 詳細は `.cursor/rules/general.mdc` を参照してください。
 
-**推奨技術スタック（カスタマイズ可能）:**
-- **フロントエンド**: React 19.2, TypeScript, Vite
+**推奨技術スタック（2026年2月時点 - 安定性重視）:**
+
+#### 実行環境
+- **Node.js**: 22.x LTS（推奨）
+  - Node.js 20.xは2026年4月でEOL
+  - Node.js 22.xは2027年4月までサポート
+
+#### フロントエンド
+- **React**: 19.2.4以上（セキュリティパッチ適用版）
+- **TypeScript**: 5.8以上
+- **ビルドツール**: Vite 6.x（Vite 7は様子見推奨）
 - **スタイリング**: Tailwind CSS
-- **状態管理**: TanStack Query, Context API
-- **バックエンド**: Express + TypeScript または Next.js API Routes
-- **データベース**: Prisma + MySQL/PostgreSQL
+- **状態管理**: TanStack Query v4/v5, Context API
+
+#### バックエンド
+- **フレームワーク**: Express + TypeScript または Next.js API Routes
+- **ORM**: Prisma 5.x（Prisma 6は様子見推奨）
+- **データベース**: MySQL 8.0 / PostgreSQL 14+
 - **認証**: JWT + bcrypt または Firebase Auth
-- **テスト**: Vitest, Supertest
-- **インフラ**: Google Cloud / AWS / Azure
+
+#### テスト
+- **ユニット・統合**: Vitest
+- **APIテスト**: Supertest
+- **E2Eテスト**: Playwright
+
+#### インフラ
+- **クラウド**: Google Cloud / AWS / Azure
+- **CI/CD**: GitHub Actions
 
 ### ディレクトリ構成
 
@@ -92,7 +111,7 @@ reference/        # 📚 参照資料（ローカルのみ、GitHub除外）
 
 📄 [**react.mdc**](./.cursor/rules/react.mdc)
 
-- React 19.2とReact Compilerについて
+- React 19.2.4とReact Compilerについて
 - メモ化のルール（React Compilerが自動最適化）
 - コンポーネント構成
 - TanStack Query の使用
@@ -594,6 +613,17 @@ find .cursor/commands -type f -name "*.md" -exec sed -i '' 's/kizuki-dsd\/manabi
 ---
 
 ## 更新履歴
+
+- 2026-02-07: 技術スタックを2026年最新版に更新（安定性重視）
+  - React 19.2.4（セキュリティパッチ適用）
+  - TypeScript 5.8
+  - Node.js 22.x LTS（Node.js 20.xは2026年4月EOL）
+  - Vite 6.x推奨（Vite 7は様子見）
+  - Prisma 5.x推奨（Prisma 6は様子見）
+  - OWASP Top 10:2025対応
+    - A03: Software Supply Chain Failures（新規）
+    - A10: Mishandling of Exceptional Conditions（新規）
+    - A02: Security Misconfiguration（ランクアップ）
 
 - 2026-02-07: AI開発支援ルール集として汎用化テンプレートを作成
   - manabiプロジェクトから規約・コマンドを抽出

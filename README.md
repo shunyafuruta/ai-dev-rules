@@ -46,47 +46,45 @@ AIを活用した効率的な開発を実現するためのコーディング規
 - **レビュー自動化**: PRに `@claude レビューして` でコードレビュー
 - **階層型AI開発チーム**: PM・Coder・Reviewerの3つのエージェントで開発を自動化
 
-### 🎯 階層型AI開発チーム（新機能）
+### 🎯 並列開発システム（新機能）
 
-**部長（人間）→ PM（AI）→ Coder（AI）↔ Reviewer（AI）**
+**設計書を読んで自動的にIssueを立て、複数のCoderが並列実装する完全自動化システム**
 
 ```
-部長（人間）
-    ↓ 要件定義
-PM（AI）
-    ↓ タスク分解・指示
-Coder（AI） ←→ Reviewer（AI）
-    実装        コードレビュー
+設計書（reference/）
+    ↓
+PM（AI）: 設計書を読んでIssueを作成
+    ↓
+state/backlog.md に Issue番号リスト
+    ↓
+Coder1  Coder2  Coder3  ← 並列実装（tmuxセッション）
+ #123    #124    #125
+    ↓      ↓      ↓
+   PR     PR     PR
 ```
 
-#### 各ロールの責務
-
-- **部長（人間）**: 要件定義、重要な判断の決裁
-- **PM（AI）**: タスク分解、進捗管理、指示出し
-- **Coder（AI）**: 実装、テスト
-- **Reviewer（AI）**: コードレビュー、品質チェック
-
-#### 状態管理
-
-- `state/current-task.md` - 現在進行中のタスク
-- `state/backlog.md` - 未着手タスク一覧
-- `state/review-queue.md` - レビュー待ち項目
-- `state/decisions.md` - 部長の決裁履歴
-
-#### 使い方
+#### ワンコマンド起動
 
 ```bash
-# PMとして起動
-cd agents/pm && claude
-
-# Coderとして起動
-cd agents/coder && claude
-
-# Reviewerとして起動
-cd agents/reviewer && claude
+cd .ai-dev-rules
+./auto-dev.sh
 ```
 
-詳細は [階層型AI開発チームガイド](#階層型ai開発チーム-1) を参照
+これだけで、以下がすべて自動実行されます:
+1. ✅ PMが設計書（`reference/`）を読む
+2. ✅ PMがタスク分解してIssueを作成
+3. ✅ 並列実装可能なIssueを検出
+4. ✅ 複数のCoderが並列でIssueを実装
+5. ✅ PRを自動作成
+
+#### 特徴
+
+- 🚀 **完全自動**: `./auto-dev.sh` 一発で設計書→Issue→実装まで自動化
+- ⚡ **並列実装**: 最大3〜10個のIssueを同時に並列実装（設定可能）
+- 🎯 **tmux + send-keys**: Zennの記事と同じアプローチで複数エージェントを制御
+- 📊 **状態管理**: `state/backlog.md` でIssueを一元管理
+
+詳細は [PARALLEL_DEVELOPMENT.md](./PARALLEL_DEVELOPMENT.md) を参照
 
 ---
 

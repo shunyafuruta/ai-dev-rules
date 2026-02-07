@@ -10,6 +10,7 @@ GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # このスクリプトがあるディレクトリ（ai-dev-rules/）
@@ -20,14 +21,44 @@ PROJECT_DIR="${1:-.}"
 PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
 
 echo -e "${BLUE}=====================================${NC}"
-echo -e "${BLUE}AI開発環境セットアップ${NC}"
+echo -e "${BLUE}   AI開発環境セットアップ${NC}"
 echo -e "${BLUE}=====================================${NC}"
 echo ""
 echo -e "${GREEN}セットアップ先:${NC} $PROJECT_DIR"
 echo ""
 
+# プロジェクトタイプを選択
+echo -e "${CYAN}プロジェクトタイプを選択してください:${NC}"
+echo ""
+echo -e "  ${CYAN}1.${NC} モノリポ（Turborepo）"
+echo -e "     ${YELLOW}→${NC} Web + API + 共有パッケージ"
+echo -e "     ${YELLOW}→${NC} 推奨: フルスタックアプリ、マイクロサービス"
+echo ""
+echo -e "  ${CYAN}2.${NC} Web アプリのみ"
+echo -e "     ${YELLOW}→${NC} React + TypeScript + Vite"
+echo -e "     ${YELLOW}→${NC} 推奨: フロントエンドのみ、SPA"
+echo ""
+echo -e "  ${CYAN}3.${NC} API サーバーのみ"
+echo -e "     ${YELLOW}→${NC} Express + TypeScript + Prisma"
+echo -e "     ${YELLOW}→${NC} 推奨: バックエンドのみ、REST API"
+echo ""
+echo -e "  ${CYAN}4.${NC} 基本セットアップのみ"
+echo -e "     ${YELLOW}→${NC} AI開発環境のみ（プロジェクト構造なし）"
+echo -e "     ${YELLOW}→${NC} 推奨: 既存プロジェクトへの導入"
+echo ""
+read -p "選択 [1-4]: " -n 1 -r PROJECT_TYPE
+echo ""
+echo ""
+
+# プロジェクトタイプの検証
+if [[ ! $PROJECT_TYPE =~ ^[1-4]$ ]]; then
+    echo -e "${RED}無効な選択です。${NC}"
+    exit 1
+fi
+
 # 確認
-read -p "この場所にAI開発環境をセットアップしますか？ (y/N): " -n 1 -r
+echo -e "${YELLOW}このセットアップを開始しますか？ (y/N):${NC} "
+read -p "" -n 1 -r
 echo
 if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     echo -e "${YELLOW}キャンセルしました。${NC}"
@@ -35,6 +66,12 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
 fi
 
 echo ""
+echo -e "${BLUE}=====================================${NC}"
+echo -e "${BLUE}   セットアップ開始${NC}"
+echo -e "${BLUE}=====================================${NC}"
+echo ""
+
+# 基本セットアップ（全プロジェクトタイプ共通）
 echo -e "${BLUE}[1/8] .cursor/ ディレクトリをコピー中...${NC}"
 if [ -d "$PROJECT_DIR/.cursor" ]; then
     echo -e "${YELLOW}  既存の .cursor/ が存在します。スキップします。${NC}"
@@ -117,32 +154,105 @@ EOF
     echo -e "${GREEN}  ✓ .gitignore を作成しました${NC}"
 fi
 
+# プロジェクト構造のセットアップ
 echo ""
-echo -e "${BLUE}[8/8] GitHubリポジトリ名の設定...${NC}"
-echo -e "${YELLOW}  .cursor/commands/ 内のリポジトリ名を更新してください。${NC}"
-echo -e "${YELLOW}  例: find .cursor/commands -type f -name '*.md' -exec sed -i '' 's/kizuki-dsd\/manabi/your-org\/your-repo/g' {} +${NC}"
+echo -e "${BLUE}[8/8] プロジェクト構造を作成中...${NC}"
+
+case $PROJECT_TYPE in
+    1)
+        # モノリポ（Turborepo）
+        echo -e "${CYAN}  モノリポ構成を作成します...${NC}"
+        mkdir -p "$PROJECT_DIR/apps/web" "$PROJECT_DIR/apps/api" "$PROJECT_DIR/packages/shared"
+        mkdir -p "$PROJECT_DIR/specification/api" "$PROJECT_DIR/specification/database" "$PROJECT_DIR/specification/ui"
+        echo -e "${GREEN}  ✓ モノリポ構造を作成しました${NC}"
+        echo -e "${YELLOW}  → apps/web/    (React + Vite)${NC}"
+        echo -e "${YELLOW}  → apps/api/    (Express + Prisma)${NC}"
+        echo -e "${YELLOW}  → packages/shared/ (共有コード)${NC}"
+        ;;
+    2)
+        # Web アプリのみ
+        echo -e "${CYAN}  Web アプリ構成を作成します...${NC}"
+        mkdir -p "$PROJECT_DIR/src"
+        mkdir -p "$PROJECT_DIR/specification/ui"
+        echo -e "${GREEN}  ✓ Web アプリ構造を作成しました${NC}"
+        echo -e "${YELLOW}  → src/ (React + Vite)${NC}"
+        ;;
+    3)
+        # API サーバーのみ
+        echo -e "${CYAN}  API サーバー構成を作成します...${NC}"
+        mkdir -p "$PROJECT_DIR/src"
+        mkdir -p "$PROJECT_DIR/prisma"
+        mkdir -p "$PROJECT_DIR/specification/api" "$PROJECT_DIR/specification/database"
+        echo -e "${GREEN}  ✓ API サーバー構造を作成しました${NC}"
+        echo -e "${YELLOW}  → src/ (Express + TypeScript)${NC}"
+        echo -e "${YELLOW}  → prisma/ (Prisma スキーマ)${NC}"
+        ;;
+    4)
+        # 基本セットアップのみ
+        echo -e "${CYAN}  基本セットアップのみ（プロジェクト構造なし）${NC}"
+        echo -e "${GREEN}  ✓ 基本セットアップ完了${NC}"
+        ;;
+esac
 
 echo ""
 echo -e "${GREEN}=====================================${NC}"
-echo -e "${GREEN}✓ セットアップが完了しました！${NC}"
+echo -e "${GREEN}   ✓ セットアップが完了しました！${NC}"
 echo -e "${GREEN}=====================================${NC}"
 echo ""
 echo -e "${BLUE}次のステップ:${NC}"
 echo ""
-echo "1. プロジェクト固有の設定をカスタマイズ:"
-echo "   - CLAUDE.md の「プロジェクト概要」セクションを編集"
-echo "   - .cursor/rules/general.mdc の技術スタックを編集"
+
+# プロジェクトタイプ別の次のステップ
+case $PROJECT_TYPE in
+    1)
+        echo -e "${CYAN}1. プロジェクト固有の設定をカスタマイズ:${NC}"
+        echo "   - CLAUDE.md の「プロジェクト概要」セクションを編集"
+        echo "   - .cursor/rules/general.mdc の技術スタックを編集"
+        echo ""
+        echo -e "${CYAN}2. 初期ファイルを作成:${NC}"
+        echo "   - apps/web/package.json, apps/web/vite.config.ts"
+        echo "   - apps/api/package.json, apps/api/src/index.ts"
+        echo "   - packages/shared/package.json"
+        echo "   - package.json (ルート)"
+        echo "   - turbo.json"
+        echo ""
+        echo -e "${CYAN}3. 依存関係をインストール:${NC}"
+        echo "   npm install"
+        ;;
+    2)
+        echo -e "${CYAN}1. プロジェクト固有の設定をカスタマイズ:${NC}"
+        echo "   - CLAUDE.md の「プロジェクト概要」セクションを編集"
+        echo ""
+        echo -e "${CYAN}2. Vite プロジェクトを初期化:${NC}"
+        echo "   npm create vite@latest . -- --template react-ts"
+        ;;
+    3)
+        echo -e "${CYAN}1. プロジェクト固有の設定をカスタマイズ:${NC}"
+        echo "   - CLAUDE.md の「プロジェクト概要」セクションを編集"
+        echo ""
+        echo -e "${CYAN}2. package.json と Prisma スキーマを作成:${NC}"
+        echo "   npm init -y"
+        echo "   npx prisma init"
+        ;;
+    4)
+        echo -e "${CYAN}1. プロジェクト固有の設定をカスタマイズ:${NC}"
+        echo "   - CLAUDE.md の「プロジェクト概要」セクションを編集"
+        echo "   - .cursor/rules/general.mdc の技術スタックを編集"
+        ;;
+esac
+
 echo ""
-echo "2. GitHubリポジトリ名を更新:"
-echo "   cd $PROJECT_DIR"
+echo -e "${CYAN}4. GitHubリポジトリ名を更新（必要に応じて）:${NC}"
 echo "   find .cursor/commands -type f -name '*.md' -exec sed -i '' 's/kizuki-dsd\/manabi/your-org\/your-repo/g' {} +"
 echo ""
-echo "3. 階層型AI開発チームを使用する場合:"
+echo -e "${CYAN}5. 階層型AI開発チームを使用:${NC}"
 echo "   cd agents/pm && claude     # PMとして起動"
 echo "   cd agents/coder && claude  # Coderとして起動"
 echo "   cd agents/reviewer && claude  # Reviewerとして起動"
 echo ""
-echo "4. 参照資料を配置:"
-echo "   cp ~/Documents/要件定義.pdf $PROJECT_DIR/reference/requirements/"
+echo -e "${CYAN}6. 1on1 & PDCA サイクルを開始:${NC}"
+echo "   /daily-standup      # 日次スタンドアップ"
+echo "   /retrospective      # 週次振り返り"
+echo "   /team-metrics       # メトリクス更新"
 echo ""
 echo -e "${GREEN}Happy coding with AI! 🚀${NC}"

@@ -1,3 +1,10 @@
+---
+description: Prismaマイグレーション作成ルール
+globs:
+  - "**/prisma/**"
+alwaysApply: false
+---
+
 # Prismaマイグレーション作成ルール
 
 ## 重要: 正しいコマンド実行方法

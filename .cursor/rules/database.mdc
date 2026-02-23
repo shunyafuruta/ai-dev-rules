@@ -1,7 +1,8 @@
 ---
 description: データベース設計規約とベストプラクティス
 globs:
-alwaysApply: true
+  - "**/prisma/**"
+alwaysApply: false
 ---
 
 # データベース設計規約

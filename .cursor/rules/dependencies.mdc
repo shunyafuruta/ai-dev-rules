@@ -1,7 +1,9 @@
 ---
 description: 依存関係管理とアップデート戦略
 globs:
-alwaysApply: true
+  - "package.json"
+  - "package-lock.json"
+alwaysApply: false
 ---
 
 # 依存関係管理

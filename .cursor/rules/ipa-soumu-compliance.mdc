@@ -1,7 +1,7 @@
 ---
 description: IPA・総務省ガイドライン対応
 globs:
-alwaysApply: true
+alwaysApply: false
 ---
 
 # IPA・総務省ガイドライン対応

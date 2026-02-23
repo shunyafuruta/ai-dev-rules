@@ -1,7 +1,9 @@
 ---
 description: テスト戦略とテスト規約
 globs:
-alwaysApply: true
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+alwaysApply: false
 ---
 
 # テスト戦略

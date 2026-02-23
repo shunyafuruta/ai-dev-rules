@@ -1,7 +1,7 @@
 ---
 description: インシデント対応計画
 globs:
-alwaysApply: true
+alwaysApply: false
 ---
 
 # インシデント対応計画

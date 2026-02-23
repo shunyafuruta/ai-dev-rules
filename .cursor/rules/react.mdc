@@ -1,7 +1,8 @@
 ---
 description: Reactコンポーネント開発規約
 globs:
-alwaysApply: true
+  - "apps/web/**/*.{ts,tsx}"
+alwaysApply: false
 ---
 
 # Reactコンポーネント規約

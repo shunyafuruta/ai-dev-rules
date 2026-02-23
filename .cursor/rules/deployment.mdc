@@ -1,7 +1,7 @@
 ---
 description: デプロイメント戦略とCI/CD
 globs:
-alwaysApply: true
+alwaysApply: false
 ---
 
 # デプロイメント戦略

@@ -1,7 +1,7 @@
 ---
 description: パフォーマンス最適化基準
 globs:
-alwaysApply: true
+alwaysApply: false
 ---
 
 # パフォーマンス最適化基準

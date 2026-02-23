@@ -1,7 +1,7 @@
 ---
 description: コンプライアンス規約（医療・金融・行政対応）
 globs:
-alwaysApply: true
+alwaysApply: false
 ---
 
 # コンプライアンス規約

@@ -2,7 +2,7 @@
 description: バックエンドAPI開発規約
 globs:
   - "apps/api/**/*.ts"
-alwaysApply: true
+alwaysApply: false
 ---
 
 # バックエンドAPI規約

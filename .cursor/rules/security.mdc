@@ -1,7 +1,7 @@
 ---
 description: セキュリティガイドライン（病院・銀行・官公庁レベル対応）
 globs:
-alwaysApply: true
+alwaysApply: false
 ---
 
 # セキュリティガイドライン

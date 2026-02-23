@@ -1,7 +1,7 @@
 ---
 description: モニタリング・ログ戦略
 globs:
-alwaysApply: true
+alwaysApply: false
 ---
 
 # モニタリング・ログ戦略
